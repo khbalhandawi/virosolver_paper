@@ -27,7 +27,7 @@ devtools::load_all(paste0(HOME_WD,"/virosolver"))
 index <- 1994
 set.seed(index)
 n_samp <- 1000
-runname <- "ma_gp"
+runname <- "rhuh_gp"
 #runname <- "ma_gp_free"
 run_version <- "gp" ##gp, seir or exp##
 rerun_mcmc <- TRUE
@@ -36,8 +36,8 @@ rerun_mcmc <- TRUE
 ## Important to set this to the full file path, as on L205 the foreach loop
 ## must move to the correct working directory to source the model functions
 main_wd <- paste0(HOME_WD,"/virosolver_paper/")
-chainwd <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/4.real_ma_ct/",runname)
-plot_wd <- paste0(HOME_WD,"/virosolver_paper/plots/4.real_ma_ct/",runname)
+chainwd <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/5.real_leb_ct/",runname)
+plot_wd <- paste0(HOME_WD,"/virosolver_paper/plots/5.real_leb_ct/",runname)
 setwd(main_wd)
 
 ## Manage MCMC runs and parallel runs
@@ -69,7 +69,7 @@ inc_func_use <- gaussian_process_model
 prior_func_use <- prior_func_hinge_gp
 
 ## GP model parameters for fitting
-parTab <- read.csv(paste0(main_wd,"/pars/massachusetts/partab_gp_model.csv"))
+parTab <- read.csv(paste0(main_wd,"/pars/lebanon/partab_gp_model.csv"))
 #parTab <- read.csv("pars/partab_gp_model_start.csv",stringsAsFactors=FALSE)
 parTab[parTab$names %in% c("nu","rho"), "values"] <- c(1.5,0.03)
 #parTab[parTab$names %in% c("nu","rho"), "fixed"] <- 0
@@ -84,11 +84,9 @@ means <- parTab$values
 names(means) <- parTab$names
 
 ########################################
-## 3. Read in MA data
+## 3. Read in RHUH data
 ########################################
-#obs_dat_all <- read_csv("~/Documents/GitHub/ct_inference_preprint/data/BWH_COVID_Cts_deid_20200403-20200831.csv") %>%
-#  mutate(id=1:n())
-obs_dat_all <- read_csv(paste0(main_wd,"/data/panther_Ct_20200403-20201110.csv")) %>% rename(panther_Ct=ORF1ab_Ct) %>%
+obs_dat_all <- read_csv(paste0(main_wd,"/data/RHUH_Ct_data.csv")) %>% rename(panther_Ct=Ct) %>%
   mutate(platform="Panther",first_pos=1) %>%
   mutate(id=1:n()) %>%
   filter(panther_Ct < 40)
@@ -98,8 +96,8 @@ obs_dat1 <- obs_dat_all
 obs_dat1 <-  obs_dat_all %>% 
   filter(platform=="Panther" &
            first_pos %in% c(1,0)) %>%
-  filter(coll_date > "2020-04-15") %>% ## After biased symptomatic sampling time
-  rename(date=coll_date) %>%
+  filter(Date > "2020-04-15") %>% ## After biased symptomatic sampling time
+  rename(date=Date) %>%
   left_join(epi_calendar) %>%
   dplyr::select(first_day,  panther_Ct, id) %>%
   mutate(first_day = as.numeric(first_day)) %>%
@@ -110,8 +108,8 @@ obs_dat1 <-  obs_dat_all %>%
 obs_dat_all <- obs_dat_all %>% 
   filter(platform=="Panther" &
            first_pos %in% c(1,0)) %>%
-  filter(coll_date > "2020-04-15") %>% ## After biased symptomatic sampling time
-  rename(date=coll_date) %>%
+  filter(Date > "2020-04-15") %>% ## After biased symptomatic sampling time
+  rename(date=Date) %>%
   left_join(epi_calendar) %>%
   dplyr::select(first_day,  panther_Ct, id) %>%
   arrange(first_day) %>%
@@ -134,9 +132,10 @@ p_dat <- ggplot(obs_dat_all %>% filter(ct < 40)) +
   geom_violin(aes(x=date,group=date,y=ct),scale="width",fill="grey70",draw_quantiles=c(0.025,0.5,0.975)) + 
   scale_y_continuous(trans="reverse") +
   export_theme +
-  scale_x_date(limits=as.Date(c("2020-01-01","2020-12-01")),breaks="1 month") +
+  scale_x_date(limits=as.Date(c("2020-04-15","2020-12-15")),breaks="1 month") +
   xlab("Date of sample") +
   ylab("Detectable Ct")
+p_dat
 
 ages <- 1:max(obs_dat1$t)
 times <- 0:max(obs_dat1$t)
@@ -201,7 +200,7 @@ if(rerun_mcmc){
     chain <- do.call("bind_rows",chains)
   } 
 }
-source("5.bwh/5.add_prior.R")
+source("6.RHUH/6.add_prior.R")
 chains_diag <- lazymcmc::load_mcmc_chains(chainwd, parTab,TRUE,1,mcmcPars_ct["adaptive_period"],
                                           multi=FALSE,chainNo=FALSE,PTchain = FALSE)
 
@@ -218,7 +217,7 @@ chain_comb <- chain[chain$chain == 1,]
 chain_comb$sampno <- 1:nrow(chain_comb)
 
 model_func <- create_posterior_func(parTab,obs_dat1,NULL,inc_func_use,"model")
-p_dist_fits <- plot_distribution_fits_bwh(chain_comb, obs_dat1, model_func,1000,TRUE,date_key)
+p_dist_fits <- plot_distribution_fits_bwh(chain_comb, obs_dat1, model_func,100,TRUE,date_key)
 
 ## Get smoothed growth rates
 test_ages <- 0:50
@@ -348,9 +347,9 @@ p_rhs <- (p_vl/p_detect)
 p_bot <-  p_lhs | p_rhs + plot_layout(widths=c(2,1))
 p_supp <- p_dist_fits[[1]]/p_dist_fits[[2]]/ p_bot + plot_layout(heights=c(1,1,3),ncol=1)
 
-if(FALSE) {
-  ggsave(filename="figures/bwh_mcmc.pdf",plot=p_supp,height=8,width=12)
-  ggsave(filename="figures/bwh_mcmc.png",plot=p_supp,height=8,width=12,units="in",dpi=300)
+if(TRUE) {
+  ggsave(filename="figures/rhuh_mcmc.pdf",plot=p_supp,height=8,width=12)
+  ggsave(filename="figures/rhuh_mcmc.png",plot=p_supp,height=8,width=12,units="in",dpi=300)
 }
 
 obs_dat_all <- obs_dat_all %>% left_join(obs_dat_all %>% group_by(date) %>% tally())
@@ -370,7 +369,7 @@ p_dat <- ggplot(obs_dat_all) +
   theme(axis.text.x=element_blank(), axis.title.x=element_blank(), 
         axis.line.x = element_blank(), axis.ticks.x = element_blank(),
         legend.position = c(0.05,0.5)) +
-  scale_x_date(limits=as.Date(c("2020-03-01","2020-12-01")),breaks="1 month",expand=c(0,0)) +
+  scale_x_date(limits=as.Date(c("2020-03-15","2020-12-15")),breaks="1 month",expand=c(0,0)) +
   xlab("Date of sample") +
   ylab("Ct value") +
   labs(tag="B")
@@ -397,12 +396,10 @@ p_inc <- ggplot(trajs_quants) +
   labs(tag="C")
 
 
-nyt_dat <- read_csv(paste0(main_wd,"/data/us-states.csv"))
-ma_dat <- nyt_dat %>% filter(state == "Massachusetts") %>%
-  mutate(new_cases = lead(cases,1) - cases)
+## LEB data
+leb_dat <- read_csv("data/RHUH_cases_data.csv")
 
-
-p_nyt <- ggplot(ma_dat) + 
+p_leb <- ggplot(leb_dat) + 
   geom_bar(aes(x=date,y=new_cases),stat="identity") +
   export_theme +
   theme(axis.text.x=element_blank(), axis.title.x=element_blank(), 
@@ -414,7 +411,7 @@ p_nyt <- ggplot(ma_dat) +
   labs(tag="A")
 
 pdf(paste0(main_wd,"/figures/",runname,".pdf"),height=7,width=8)
-p_nyt/p_dat/p_inc  
+p_leb/p_dat/p_inc  
 dev.off()
 
 

@@ -15,13 +15,23 @@ library(fitdistrplus)
 library(deSolve)
 library(lazymcmc) ## devtools::install_github("jameshay218/lazymcmc")
 library(doParallel)
-devtools::load_all("~/Documents/GitHub/virosolver")
+
+AAAS_palette <- c("blue1"="#3B4992FF","red1"="#EE0000FF","green1"="#008B45FF",
+                  "purple1"="#631879FF","teal1"="#008280FF","red2"="#BB0021FF",
+                  "purple2"="#5F559BFF","purple3"="#A20056FF",
+                  "grey1"="#808180FF","black"="1B1919FF")
+
+#HOME_WD <- "~/"
+HOME_WD <- "C:/Users/Khalil/Desktop/repos"
+devtools::load_all(paste0(HOME_WD,"/virosolver"))
+
+## Where the MCMC chains are stored
+main_wd <- paste0(HOME_WD,"/virosolver_paper/")
 
 ## Set flag to write plots to disk or not
 save_plots <- FALSE
 
 ## CHANGE TO MAIN WD
-main_wd <- "~/Documents/GitHub/virosolver_paper/"
 setwd(main_wd)
 source("code/plot_funcs.R")
 
@@ -45,9 +55,8 @@ runname_seir_prior_broad <- "ma_seir_rerun_prior"
 runname_seir_alt <- "ma_seir_rerun" ## Less constrained prior on seed time
 runname_exp <- "ma_exp"
 
-## Where the MCMC chains are stored
-chainwd <- paste0("~/Documents/GitHub/virosolver_paper/mcmc_chains/5.real_ma_single_timepoint/")
-chainwd_gp <- paste0("~/Documents/GitHub/virosolver_paper/mcmc_chains/4.real_ma_ct/ma_gp/")
+chainwd <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/5.real_ma_single_timepoint/")
+chainwd_gp <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/4.real_ma_ct/ma_gp/")
 
 ## MCMC parameters for Ct model fits
 mcmcPars_ct_seir <- c("adaptive_period"=30000)
@@ -118,8 +127,8 @@ for(i in seq_along(obs_times)){
 ########################################
 ## NYT data
 #nyt_dat <- read_csv("data/us-states.csv")
-nyt_dat <- read_csv("~/Documents/GitHub/covid-19-data/us-states.csv")
-nyt_dat <- read_csv("~/Documents/GitHub/covid-19-data/us-counties.csv")
+nyt_dat <- read_csv(paste0(HOME_WD,"/covid-19-data/us-states.csv"))
+nyt_dat <- read_csv(paste0(HOME_WD,"/covid-19-data/us-counties.csv"))
 nyt_dat <- nyt_dat %>% 
   filter(state=="Massachusetts",
          county == "Suffolk") %>%
@@ -132,11 +141,11 @@ rt_dat <- estimates$estimates$summarised %>% filter(variable %in% c("growth_rate
 
 ## Split based on above or below Rt = 1
 rt_dat_top <- rt_dat %>%
-  mutate(bottom=pmax(0,bottom),
-         top=pmax(0,top))
+  mutate(bottom=pmax(0,lower_90),
+         top=pmax(0,upper_90))
 rt_dat_bot <- rt_dat %>%
-  mutate(bottom=pmin(0,bottom),
-         top=pmin(0,top))
+  mutate(bottom=pmin(0,lower_90),
+         top=pmin(0,upper_90))
 ## Same thing for median line
 rt_median <- rt_dat %>% mutate(is_grow=ifelse(median>0,"Growing","Declining"))
 index <- 1
@@ -151,13 +160,13 @@ coeff <- 2500
 yshift <- 500
 p1 <-  ggplot(nyt_dat)+ 
   geom_bar(aes(x=date,y=new_cases),stat="identity",alpha=0.5,fill=AAAS_palette["grey1"]) +
-  #geom_ribbon(data=dat_infections,aes(x=date,ymin=bottom,ymax=top),
+  #geom_ribbon(data=dat_infections,aes(x=date,ymin=lower_90,ymax=upper_90),
   #            fill=AAAS_palette["grey1"],alpha=0.5) +
   #geom_line(data=dat_infections,aes(x=date,y=mean),col=AAAS_palette["grey1"]) +
   geom_hline(yintercept=yshift,linetype="dashed",col=AAAS_palette["grey1"]) +
-  geom_ribbon(data=rt_dat_top,aes(x=date,ymin=bottom*coeff + yshift,ymax=top*coeff + yshift),
+  geom_ribbon(data=rt_dat_top,aes(x=date,ymin=lower_90*coeff + yshift,ymax=upper_90*coeff + yshift),
               fill="darkorange",alpha=0.25) +
-  geom_ribbon(data=rt_dat_bot,aes(x=date,ymin=bottom*coeff + yshift,ymax=top*coeff + yshift),
+  geom_ribbon(data=rt_dat_bot,aes(x=date,ymin=lower_90*coeff + yshift,ymax=upper_90*coeff + yshift),
               fill=AAAS_palette["green1"],alpha=0.25) +
   geom_line(data=rt_median,aes(x=date,y=median*coeff + yshift,col=is_grow,group=index)) +
   scale_y_continuous(expand=c(0,0),limits=c(0,1000),
@@ -241,6 +250,7 @@ p_dat <- ggplot(obs_dat_all) +
   xlab("Date of sample") +
   ylab("Ct value") +
   labs(tag="C")
+p_dat
 
 ########################################
 ## 5. Rt scatterplot
@@ -295,212 +305,6 @@ p_rt <- ggplot(combined_dat1 %>% rename(Rt=mean_rt)) +
   export_theme + 
   theme(legend.position=c(0.2,0.7)) + 
   labs(tag="B")
-
-########################################
-## 6. GP dials
-########################################
-grs_daily <- NULL
-grs_average <- NULL
-prop_grow_daily <- NULL
-prop_grow_average <- NULL
-ps_daily <- NULL
-ps_average <- NULL
-
-trajs_dat_all <- NULL
-
-beta_max <- 0.5
-overall_circle_top <- data.frame(y=c(0,seq(0,beta_max,by=0.001)),x=c(0,sqrt(beta_max^2-seq(0,beta_max,by=0.001)^2)))
-overall_circle_bot <- data.frame(y=c(0,seq(-beta_max,0,by=0.001)),x=c(0,sqrt(beta_max^2-seq(-beta_max,0,by=0.001)^2)))
-beta_max1 <- beta_max*0.7
-small_overall_circle_top <- data.frame(y=c(0,seq(0,beta_max1,by=0.001)),x=c(0,sqrt(beta_max1^2-seq(0,beta_max1,by=0.001)^2)))
-small_overall_circle_bot <- data.frame(y=c(0,seq(-beta_max1,0,by=0.001)),x=c(0,sqrt(beta_max1^2-seq(-beta_max1,0,by=0.001)^2)))
-
-for(i in seq_along(obs_times)){
-  timepoint <- obs_times[i]
-  runname_use_seir <- runname_seir
-  runname_use_exp <- runname_exp
-  
-  obs_dat_tmp <- obs_dat_use <- obs_dat1 %>% filter(t == timepoint) 
-  obs_dat_seir <- obs_dat_exp <- obs_dat_use
-  obs_dat_seir <- obs_dat_seir %>% mutate(t=t+seir_timeshift)
-  
-  ## Observation times
-  obs_dat_exp <- obs_dat_exp %>% mutate(t = t - min(t), t = t + 35)
-  
-  ages_exp <- 1:max(obs_dat_exp$t)
-  times_exp <- 0:max(obs_dat_exp$t)
-  ages_seir <- 1:max(obs_dat_seir$t)
-  times_seir <- 0:max(obs_dat_seir$t)
-  
-  chain_seir <- res_seir[[i]]
-  chain_comb_seir <- chain_seir
-  chain_comb_seir$sampno <- 1:nrow(chain_comb_seir)
-  chain1_seir <- chain_seir
-  chain_comb_seir <- chain_comb_seir[,colnames(chain_comb_seir) != "chain"]
-  
-  chain_exp <- res_exp[[i]]
-  chain_comb_exp <- chain_exp
-  chain_comb_exp$sampno <- 1:nrow(chain_comb_exp)
-  chain1_exp <- chain_exp
-  chain_comb_exp <- chain_comb_exp[,colnames(chain_comb_exp) != "chain"]
-  
-  
-  ## Get daily growth rate
-  samps <- sample(unique(chain_comb_seir$sampno),n_samp)
-  trajs <- matrix(0, nrow=n_samp,ncol=length(times_seir))
-  t0s <- NULL
-  for(k in seq_along(samps)){
-    trajs[k,] <- pmax(solveSEIRModel_rlsoda_wrapper(get_index_pars(chain_comb_seir, samps[k]),times_seir),0)
-    t0s[k] <- get_index_pars(chain_comb_seir, samps[k])["t0"]
-  }
-  #trajs <- t(apply(trajs,1,function(x) x/sum(x)))
-  trajs_dat <- data.frame(trajs)
-  colnames(trajs_dat) <- times_seir
-  trajs_dat$samp <- 1:nrow(trajs_dat)
-  trajs_dat$t0 <- t0s
-  trajs_dat <- reshape2::melt(trajs_dat,id.vars=c("samp","t0"))
-  
-  colnames(trajs_dat) <- c("samp","t0","t","inc")
-  trajs_dat$t <- as.numeric(trajs_dat$t)
-  trajs_dat$obs_time <- timepoint
-  
-  trajs_dat_all[[i]] <- trajs_dat
-  
-  trajs1 <- t(apply(trajs, 1, function(x) log(x[2:length(x)]/x[1:(length(x)-1)])))
-  trajs1[trajs1 < -0.5] <- -0.5
-  trajs1[trajs1 > 0.5] <- 0.5
-  trajs1_quants <- t(apply(trajs1, 2, function(x) quantile(x,c(0.025,0.25,0.5,0.75,0.975),na.rm=TRUE)))
-  trajs1_quants <- as.data.frame(trajs1_quants)
-  trajs1_quants$t <- 1:nrow(trajs1_quants)
-  colnames(trajs1_quants) <- c("lower95","lower50","median","upper50","upper95","t")
-  
-  tmp_beta <- trajs1[,ncol(trajs1)]
-  beta_quants <- cbind(seq(0.05,0.95,by=0.01), t(sapply(seq(0.05,0.95,by=0.01), 
-                                                        function(y) quantile(tmp_beta, c(0.5-y/2,0.5+y/2),na.rm=TRUE))))
-  
-  dats_all <- NULL
-  p_daily <- ggplot() +
-    geom_polygon(data=overall_circle_top, aes(x=x,y=y),fill="darkorange",alpha=0.25) +
-    geom_polygon(data=overall_circle_bot, aes(x=x,y=y),fill=AAAS_palette["green1"],alpha=0.25) +
-    geom_polygon(data=small_overall_circle_top, aes(x=x,y=y),fill="white",alpha=1) +
-    geom_polygon(data=small_overall_circle_bot, aes(x=x,y=y),fill="white",alpha=1)
-  
-  for(j in 1:nrow(beta_quants)){
-    alpha <- beta_quants[j,1]
-    lower <- beta_quants[j,2]
-    upper <- beta_quants[j, 3]
-    y <- seq(lower,upper,by=0.01)
-    tmp <- data.frame(y=beta_max*sin(pi*y),x=beta_max*cos(pi*y),alpha=1-alpha,quant=i)
-    tmp <- bind_rows(tmp, data.frame(y=0,x=0,alpha=1-alpha,quant=i))
-    dats_all[[i]] <- tmp
-    p_daily <- p_daily + geom_polygon(data=tmp,aes(x=x,y=y),alpha=0.05,fill=AAAS_palette["blue1"])
-  }
-  
-  med_segment <- quantile(tmp_beta, 0.5,na.rm=TRUE)
-  ps_daily[[i]] <-  p_daily + scale_y_continuous(limits=c(-0.5,0.5)) +
-    geom_segment(data=data.frame(y=0,yend=beta_max*sin(pi*med_segment),x=0,xend=beta_max*cos(pi*med_segment)),
-                 aes(x=x,y=y,xend=xend,yend=yend),
-                 arrow=arrow(length=unit(0.1,"npc")),col="yellow",size=0.5) +
-    coord_cartesian(xlim=c(-beta_max,beta_max), ylim=c(-beta_max,beta_max)) + 
-    scale_y_continuous(expand=c(0,0)) +
-    scale_x_continuous(expand=c(0,0)) +
-    coord_flip() +
-    theme_void() +
-    theme(axis.text=element_blank(),plot.margin= unit(c(0,0,0,0),"in"))
-  
-  tmp_beta <- chain_comb_exp$beta
-  beta_quants <- cbind(seq(0.05,0.95,by=0.01), t(sapply(seq(0.05,0.95,by=0.01), 
-                                                        function(y) quantile(tmp_beta, c(0.5-y/2,0.5+y/2),na.rm=TRUE))))
-  ## Average growth rates
-  p_average <- ggplot() +
-    geom_polygon(data=overall_circle_top, aes(x=x,y=y),fill="darkorange",alpha=0.25) +
-    geom_polygon(data=overall_circle_bot, aes(x=x,y=y),fill="#008B45FF",alpha=0.25) +
-    geom_polygon(data=small_overall_circle_top, aes(x=x,y=y),fill="white",alpha=1) +
-    geom_polygon(data=small_overall_circle_bot, aes(x=x,y=y),fill="white",alpha=1)
-  
-  for(j in 1:nrow(beta_quants)){
-    alpha <- beta_quants[j,1]
-    lower <- beta_quants[j,2]
-    upper <- beta_quants[j, 3]
-    y <- seq(lower,upper,by=0.01)
-    tmp <- data.frame(y=beta_max*sin(pi*y),x=beta_max*cos(pi*y),alpha=1-alpha,quant=i)
-    tmp <- bind_rows(tmp, data.frame(y=0,x=0,alpha=1-alpha,quant=i))
-    dats_all[[i]] <- tmp
-    p_average <- p_average + geom_polygon(data=tmp,aes(x=x,y=y),alpha=0.05,fill=AAAS_palette["teal1"])
-  }
-  
-  med_segment <- quantile(tmp_beta, 0.5,na.rm=TRUE)
-  ps_average[[i]] <-  p_average + 
-    scale_y_continuous(limits=c(-0.5,0.5)) +
-    geom_segment(data=data.frame(y=0,yend=beta_max*sin(pi*med_segment),x=0,xend=beta_max*cos(pi*med_segment)),
-                 aes(x=x,y=y,xend=xend,yend=yend),
-                 arrow=arrow(length=unit(0.1,"npc")),col="yellow",size=0.5) +
-    coord_cartesian(xlim=c(-beta_max,beta_max), ylim=c(-beta_max,beta_max)) + 
-    scale_y_continuous(expand=c(0,0)) +
-    scale_x_continuous(expand=c(0,0)) +
-    coord_flip() +
-    theme_void() +
-    theme(axis.text=element_blank(),plot.margin= unit(c(0,0,0,0),"in"))
-  
-  chain_exp <- res_exp[[i]]
-  chain_comb_exp <- chain_exp
-  chain_comb_exp$sampno <- 1:nrow(chain_comb_exp)
-  chain1_exp <- chain_exp
-  chain_comb_exp <- chain_comb_exp[,colnames(chain_comb_exp) != "chain"]
-  
-  grs_daily[[i]] <- trajs1_quants[nrow(trajs1_quants),] %>% mutate(t=t-seir_timeshift)
-  grs_average[[i]] <- c(quantile(chain_comb_exp$beta, c(0.025,0.25,0.5,0.75,0.975),na.rm=TRUE),timepoint)
-  
-  prop_grow_daily[[i]] <- sum(trajs1[,ncol(trajs1)] > 0)/nrow(trajs1)
-  prop_grow_average[[i]] <- sum(chain_comb_exp$beta > 0)/nrow(chain_comb_exp)
-}
-
-trajs_dat_all_comb <- do.call("bind_rows", trajs_dat_all)
-
-
-ps_all_daily <- ps_daily[[1]] + 
-  #geom_hline(yintercept = 0,linetype="dashed",size=0.5,color="grey40") +
-  theme(plot.tag = element_text(family="sans",size=10,face="bold")) +
-  labs(tag="E")
-ps_all_average <- ps_average[[1]] + 
-  #geom_hline(yintercept = 0,linetype="dashed",size=0.5,color="grey40") +
-  theme(plot.tag = element_text(family="sans",size=10,face="bold")) +
-  labs(tag="E")
-for(i in seq(4,length(obs_times),by=3)){
-  ps_all_average <- ps_all_average | (ps_average[[i]] + geom_hline(yintercept = 0,linetype="dashed",size=0.5,color="grey40"))
-  ps_all_daily <- ps_all_daily | (ps_daily[[i]] + geom_hline(yintercept = 0,linetype="dashed",size=0.5,color="grey40"))
-}
-
-beta_max2 <- beta_max*1.2
-text_circle_top <- data.frame(y=c(0,beta_max2*cos(pi*seq(0,beta_max,by=beta_max/5))),
-                              x=c(0,beta_max2*sin(pi*seq(0,beta_max,by=beta_max/5))),
-                              text=c(NA,rev(seq(0,beta_max,by=0.1))))
-
-text_circle_bot <- data.frame(y=c(0,-beta_max2*cos(pi*seq(0,beta_max,by=beta_max/5))),
-                              x=c(0,beta_max2*sin(pi*seq(0,beta_max,by=beta_max/5))),
-                              text=c(NA,seq(-beta_max,0,by=0.1)))
-
-beta_lines <- data.frame(x=0,y=0,group=seq_along(seq(0,beta_max,by=beta_max/5)),
-                         yend=beta_max2*cos(pi*seq(0,beta_max,by=beta_max/5)),
-                         xend=beta_max2*sin(pi*seq(0,beta_max,by=beta_max/5)))
-
-
-p_use_dial <-ps_daily[[10]] +
-  scale_x_continuous(expand=c(0,0),limits=c(-0.1,beta_max+0.3)) +
-  scale_y_continuous(expand=c(0,0),limits=c(-beta_max-0.2,beta_max+0.2)) +
-  geom_vline(xintercept=0,size=0.1)+
-  geom_segment(data=beta_lines,aes(x=x,y=y,xend=xend,yend=yend,group=as.factor(group)),
-               linetype="dashed",col="black",size=0.1) +
-  geom_segment(data=beta_lines,aes(x=x,y=y,xend=xend,yend=-yend,group=as.factor(group)),
-               linetype="dashed",col="black",size=0.1) +
-  geom_label(data=text_circle_top,aes(x=x,y=y,label=text),size=2) +
-  geom_label(data=text_circle_bot,aes(x=x,y=y,label=text),size=2) +
-  geom_text(data=data.frame(x=0.6,y=0.5,label="Growth"),aes(x=x,y=y,label=label),size=3) +
-  geom_text(data=data.frame(x=0.6,y=-0.5,label="Decline"),aes(x=x,y=y,label=label),size=3) +
-  theme_void() +
-  theme(plot.margin=unit(c(0,-4,0,-4),unit="cm"),
-        plot.tag = element_text(family="sans",size=10,face="bold")) +
-  labs(tag="D")
 
 ########################################
 ## 7. GP fit
@@ -561,10 +365,10 @@ p_inc <- ggplot(gp_trajs_quants %>% left_join(date_key)) +
 gp_trajs1_quants_joined <- left_join(gp_trajs1_quants, date_key)
 gr_dat <- estimates$estimates$summarised %>% filter(variable == "growth_rate") %>% 
   filter(type=="estimate") %>%
-  dplyr::select(date, mean,top,bottom) %>%
+  dplyr::select(date, mean,upper_90,lower_90) %>%
   rename(gr_mean=mean,
-         gr_lower=bottom,
-         gr_upper=top)
+         gr_lower=lower_90,
+         gr_upper=upper_90)
 
 gr_dat_top <- gr_dat %>%
   mutate(gr_lower=pmax(0,gr_lower),
@@ -628,7 +432,7 @@ p_grs <- ggplot() +
 ########################################
 ## 9. Pull together
 ########################################
-if(FALSE){
+if(TRUE){
   pdf("figures/Figure4.pdf",height=6,width=9)
   (((p1/p_dat/((ps_all_daily | plot_spacer()))/p_inc) + plot_layout(heights=c(4,3.5,0.5,4))) | (((plot_spacer()|p_rt)+plot_layout(widths=c(1,50)))/p_use_dial/p_grs)) + plot_layout(widths=c(2,1))
   dev.off()

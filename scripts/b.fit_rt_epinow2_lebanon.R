@@ -21,17 +21,11 @@ epiweeks <- lubridate::epiweek(dates)
 epi_calendar <- tibble(date=dates,week=epiweeks)
 epi_calendar <- epi_calendar %>% group_by(week) %>% mutate(first_day=min(date))
 
-## NYT data
-nyt_dat <- read_csv("data/us-counties.csv")
-nyt_dat <- nyt_dat %>% 
-  filter(state=="Massachusetts",
-         county == "Suffolk") %>%
-  group_by(state) %>%
-  mutate(new_cases=cases-lag(cases, 1)) %>%
-  filter(new_cases >= 0)
+## LEB data
+leb_dat <- read_csv("data/RHUH_cases_data.csv")
 
 ## Plot case counts
-p1 <- nyt_dat %>% 
+p1 <- leb_dat %>% 
   ## Highlight anomalous cases
   #mutate(new_cases1=ifelse(new_cases > 3500, lag(new_cases,1), new_cases)) %>%
   ## Get rolling mean
@@ -41,7 +35,7 @@ p1 <- nyt_dat %>%
   #geom_ribbon(aes(x=date,ymax=roll_mean,ymin=0),fill="grey70",alpha=0.5,col="grey20") +
   #scale_fill_npg() +
   scale_fill_manual(values=c("grey40","darkred")) +
-  scale_y_continuous(expand=c(0,0),limits=c(0,1000)) +
+  scale_y_continuous(expand=c(0,0),limits=c(0,2000)) +
   scale_x_date(limits=as.Date(c("2020-04-01", "2020-12-01"), "%Y-%m-%d"), breaks="7 days",
                expand=c(0,0)) +
   theme_classic()+
@@ -57,7 +51,7 @@ p1 <- nyt_dat %>%
 p1
 
 ## Rt estimation on these case counts
-rt_dat <- nyt_dat %>% 
+rt_dat <- leb_dat %>% 
   ungroup() %>%
   dplyr::select(date, new_cases) %>%
   drop_na() %>%
@@ -83,6 +77,6 @@ if(rerun){
                       control = list(adapt_delta = 0.95)),
                       horizon = 7)
 
-  saveRDS(estimates,"results/ma_county_rt_fit.RData")
+  saveRDS(estimates,"results/RHUH_rt_fit.RData")
 }
   
