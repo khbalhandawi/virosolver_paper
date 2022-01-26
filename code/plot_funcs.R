@@ -1,10 +1,10 @@
 
 ## Create an epiweek calendar
-dates <- seq(as.Date("2020-01-01"),as.Date("2020-12-31"),by="1 day")
-epiweeks <- lubridate::epiweek(dates)
+dates <- seq(as.Date("2020-01-01"),as.Date("2021-04-01"),by="1 day")
+date_start <- rep(as.Date("2020-01-01"), times=length(dates))
+epiweeks <- floor(difftime(dates,date_start,units = "weeks"))+1
 epi_calendar <- tibble(date=dates,week=epiweeks)
 epi_calendar <- epi_calendar %>% group_by(week) %>% mutate(first_day=min(date))
-
 
 export_theme <- theme_tufte() +
   theme(

@@ -132,7 +132,7 @@ p_dat <- ggplot(obs_dat_all %>% filter(ct < 40)) +
   geom_violin(aes(x=date,group=date,y=ct),scale="width",fill="grey70",draw_quantiles=c(0.025,0.5,0.975)) + 
   scale_y_continuous(trans="reverse") +
   export_theme +
-  scale_x_date(limits=as.Date(c("2020-04-15","2020-12-15")),breaks="1 month") +
+  # scale_x_date(limits=as.Date(c("2020-04-15","2021-04-15")),breaks="1 month",NA) +
   xlab("Date of sample") +
   ylab("Detectable Ct")
 p_dat
@@ -249,7 +249,7 @@ p_gr <- ggplot(trajs1_quants) +
   geom_hline(yintercept=0,linetype="dashed") +
   ylab("Daily growth rate") +
   xlab("Date") +
-  scale_x_date(limits=as.Date(c("2020-03-01","2020-12-01")),breaks="1 month",expand=c(0,0)) +
+  scale_x_date(limits=as.Date(c("2020-03-01","2021-04-01")),breaks="1 month",expand=c(0,0)) +
   coord_cartesian(ylim=c(-0.5,0.5))
 
 detect_trajs1 <- t(apply(detect_trajs, 2, function(x) quantile(x, c(0.025,0.25,0.5,0.75,0.975))))
@@ -369,7 +369,7 @@ p_dat <- ggplot(obs_dat_all) +
   theme(axis.text.x=element_blank(), axis.title.x=element_blank(), 
         axis.line.x = element_blank(), axis.ticks.x = element_blank(),
         legend.position = c(0.05,0.5)) +
-  scale_x_date(limits=as.Date(c("2020-03-15","2020-12-15")),breaks="1 month",expand=c(0,0)) +
+  scale_x_date(limits=as.Date(c("2020-03-15","2021-04-15")),breaks="1 month",expand=c(0,0)) +
   xlab("Date of sample") +
   ylab("Ct value") +
   labs(tag="B")
@@ -390,7 +390,7 @@ p_inc <- ggplot(trajs_quants) +
   export_theme +
   ylab("Relative probability of infection") +
   xlab("Date") +
-  scale_x_date(limits=as.Date(c("2020-03-01","2020-12-01")),breaks="1 month",expand=c(0,0)) +
+  scale_x_date(limits=as.Date(c("2020-03-01","2021-04-01")),breaks="1 month",expand=c(0,0)) +
   #coord_cartesian(ylim=c(-0.0001,0.005)) +
   scale_y_continuous(expand=c(0,0))  +
   labs(tag="C")
@@ -404,7 +404,7 @@ p_leb <- ggplot(leb_dat) +
   export_theme +
   theme(axis.text.x=element_blank(), axis.title.x=element_blank(), 
         axis.line.x = element_blank(), axis.ticks.x = element_blank()) +
-  scale_x_date(limits=as.Date(c("2020-03-01","2020-12-01")),breaks="1 month",expand=c(0,0)) +
+  scale_x_date(limits=as.Date(c("2020-03-01","2021-04-01")),breaks="1 month",expand=c(0,0)) +
   scale_y_continuous(limits=c(0,5000)) +
   xlab("Date") +
   ylab("Number of cases") +
