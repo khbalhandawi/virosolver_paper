@@ -38,6 +38,7 @@ rerun_mcmc <- TRUE
 main_wd <- paste0(HOME_WD,"/virosolver_paper/")
 chainwd <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/5.real_leb_ct/",runname)
 plot_wd <- paste0(HOME_WD,"/virosolver_paper/plots/5.real_leb_ct/",runname)
+data_wd <- paste0(HOME_WD,"/virosolver_paper/data/LEB_OBS/",runname)
 setwd(main_wd)
 
 ## Manage MCMC runs and parallel runs
@@ -49,7 +50,14 @@ registerDoParallel(cl)
 ## MCMC parameters for Ct model fits
 mcmcPars_ct <- c("iterations"=500000,"popt"=0.44,"opt_freq"=2000,
                  "thin"=350,"adaptive_period"=200000,"save_block"=100)
-
+## MCMC parameters for Ct model fits if using parallel tempering branch
+n_temperatures <- 10
+mcmcPars_ct_pt <- c("iterations"=500000,"popt"=0.44,"opt_freq"=2000,
+                  "thin"=350,"adaptive_period"=200000,"save_block"=100,
+                  "temperature" = seq(1,101,length.out=n_temperatures),
+                  "parallel_tempering_iter" = 5,"max_adaptive_period" = 50000, 
+                  "adaptiveLeeway" = 0.2, "max_total_iterations" = 50000)
+                  
 ## Code for plotting
 source("code/plot_funcs.R")
 ## Priors for all models - EDIT THIS FILE TO CHANGE PRIORS!
@@ -61,6 +69,7 @@ source("code/odin_funcs.R")
 
 if(!file.exists(chainwd)) dir.create(chainwd,recursive = TRUE)
 if(!file.exists(plot_wd)) dir.create(plot_wd,recursive = TRUE)
+if(!file.exists(data_wd)) dir.create(data_wd,recursive = TRUE)
 
 ########################################
 ## 2. Model parameters and simulation settings
@@ -114,6 +123,9 @@ obs_dat_all <- obs_dat_all %>%
   dplyr::select(first_day,  panther_Ct, id) %>%
   arrange(first_day) %>%
   rename(date = first_day, ct=panther_Ct)
+
+# Write to csv for animation
+write.csv(obs_dat1,paste0(main_wd,"/data/LEB_OBS/LEB_gp_cts.csv"))
 
 comb_dat <- left_join(obs_dat1, obs_dat_all)
 date_key <- distinct(comb_dat %>% dplyr::select(t, date))
@@ -184,7 +196,7 @@ if(rerun_mcmc){
                        INCIDENCE_FUNC=inc_func_use,
                        PRIOR_FUNC = prior_func_use,
                        solve_likelihood=TRUE,
-                       mcmcPars=mcmcPars_ct,
+                       mcmcPars=mcmcPars_ct_pt,
                        filename=paste0(chainwd,"/",runname,"_chainno_",j),
                        CREATE_POSTERIOR_FUNC=create_posterior_func,
                        mvrPars=NULL,

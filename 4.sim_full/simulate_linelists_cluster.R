@@ -19,7 +19,7 @@ library(lazymcmc)
 library(patchwork)
 library(ggthemes)
 library(odin)
-HOME_WD <- "~/Documents/GitHub/"
+HOME_WD <- "C:/Users/Khalil/Desktop/repos"
 devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
 ## Where to perform the simulations
@@ -52,7 +52,7 @@ for(task_id in 1:10){
   names(pars) <- model_pars$names
   
   ## Simulation parameters
-  population_n <- 1000000
+  population_n <- as.integer(1000000)
   ## Over the course of 200 days
   times <- 0:200
   
@@ -71,7 +71,7 @@ for(task_id in 1:10){
   
   ## Simulate onset times, confirmation delays etc
   ## This returns a tibble with line list entries for **every** individual in the population
-  complete_linelist <- virosolver::simulate_observations_wrapper(seir_dynamics$incidence,times=times,
+  complete_linelist <- virosolver::simulate_observations_wrapper(as.integer(seir_dynamics$incidence),times=times,
                                                                     population_n=population_n)
   
   ########################################

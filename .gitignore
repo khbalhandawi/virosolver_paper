@@ -55,5 +55,7 @@ data/MA_SEIR_sim/*
 data/ReportSims/*
 data/ONS_sim/*
 data/NH_sim/*
+data/LEB_OBS/*
 data/RHUH*
 Rplots.pdf
+*.gif
