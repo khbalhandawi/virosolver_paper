@@ -15,11 +15,8 @@ library(fitdistrplus)
 library(deSolve)
 library(lazymcmc) ## devtools::install_github("jameshay218/lazymcmc")
 library(doParallel)
-
-AAAS_palette <- c("blue1"="#3B4992FF","red1"="#EE0000FF","green1"="#008B45FF",
-                  "purple1"="#631879FF","teal1"="#008280FF","red2"="#BB0021FF",
-                  "purple2"="#5F559BFF","purple3"="#A20056FF",
-                  "grey1"="#808180FF","black"="1B1919FF")
+library(zoo)
+library(pracma)
 
 #HOME_WD <- "~/"
 HOME_WD <- "C:/Users/Khalil/Desktop/repos"
@@ -29,7 +26,7 @@ devtools::load_all(paste0(HOME_WD,"/virosolver"))
 main_wd <- paste0(HOME_WD,"/virosolver_paper/")
 
 ## Set flag to write plots to disk or not
-save_plots <- FALSE
+save_plots <- TRUE
 
 ## CHANGE TO MAIN WD
 setwd(main_wd)
@@ -37,28 +34,38 @@ source("code/plot_funcs.R")
 
 export_theme <- export_theme + theme(plot.margin=unit(c(0,0,0,0),units="cm"),plot.tag=element_text(size=10,face="bold"))
 
-
 ## Arguments for this run
-set.seed(1)
+set.seed(1994)
 n_samp <- 1000
+use_pt <- TRUE
 
-chainwd_gp <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/4.real_ma_ct/RHUH_gp/")
+runname <- "rhuh_gp_cap.og"
+end_date <- "2020-12-01"
+end_plot <- "2020-12-15"
+# runname <- "rhuh_gp_cap.unseen"
+# end_date <- "2021-04-01"
+# end_plot <- "2021-04-15"
+
+chainwd <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/5.real_leb_ct/",runname)
+results_wd <- paste0(HOME_WD,"/virosolver_paper/results")
 
 ## MCMC parameters for Ct model fits
-mcmcPars_ct_exp <- c("adaptive_period"=30000)
+mcmcPars_ct <- c("adaptive_period"=200000)
 
-## Create an epiweek calendar
-dates <- seq(as.Date("2020-01-01"),as.Date("2020-12-31"),by="1 day")
-epiweeks <- lubridate::epiweek(dates)
-epi_calendar <- tibble(date=dates,week=epiweeks)
-epi_calendar <- epi_calendar %>% group_by(week) %>% mutate(first_day=min(date))
+## GP model parameters for fitting
+parTab <- read.csv(paste0(main_wd,"/pars/lebanon/partab_gp_model.csv"))
+
+if (use_pt) {
+  devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
+}
 
 ########################################
 ## 3. MA incidence plot and Rt
 ########################################
 ## LEB data
-leb_dat <- read_csv("data/RHUH_cases_data.csv")
-
+leb_dat <- read_csv("data/RHUH_cases_data.csv") %>%
+  mutate(roll_mean=rollmean(new_cases, 7,fill=NA,align="right")) %>%
+  filter(date > "2020-04-15" & date < end_date) ## After biased symptomatic sampling time
 ## Rt fit
 #estimates <- readRDS("~/Documents/GitHub/ct_dynamics_preprint/results/ma_rt_fit.RData")
 estimates <- readRDS("results/RHUH_rt_fit.RData")
@@ -81,23 +88,23 @@ for(i in 2:nrow(rt_median)){
   }
   rt_median$index[i] <- index
 }
-coeff <- 2500
-yshift <- 500
+coeff <- 6000
+yshift <- 1000
 p1 <-  ggplot(leb_dat)+ 
-  geom_bar(aes(x=date,y=new_cases),stat="identity",alpha=0.5,fill=AAAS_palette["grey1"]) +
-  #geom_ribbon(data=dat_infections,aes(x=date,ymin=lower_90,ymax=upper_90),
+  geom_bar(aes(x=date,y=roll_mean),stat="identity",alpha=0.5,fill=AAAS_palette["grey1"]) +
+  #geom_ribbon(data=dat_infections,aes(x=date,ymin=bottom,ymax=top),
   #            fill=AAAS_palette["grey1"],alpha=0.5) +
   #geom_line(data=dat_infections,aes(x=date,y=mean),col=AAAS_palette["grey1"]) +
   geom_hline(yintercept=yshift,linetype="dashed",col=AAAS_palette["grey1"]) +
-  geom_ribbon(data=rt_dat_top,aes(x=date,ymin=lower_90*coeff + yshift,ymax=upper_90*coeff + yshift),
+  geom_ribbon(data=rt_dat_top,aes(x=date,ymin=bottom*coeff + yshift,ymax=top*coeff + yshift),
               fill="darkorange",alpha=0.25) +
-  geom_ribbon(data=rt_dat_bot,aes(x=date,ymin=lower_90*coeff + yshift,ymax=upper_90*coeff + yshift),
+  geom_ribbon(data=rt_dat_bot,aes(x=date,ymin=bottom*coeff + yshift,ymax=top*coeff + yshift),
               fill=AAAS_palette["green1"],alpha=0.25) +
   geom_line(data=rt_median,aes(x=date,y=median*coeff + yshift,col=is_grow,group=index)) +
   scale_y_continuous(expand=c(0,0),limits=c(0,2000),
                      sec.axis=sec_axis(~.*1/coeff - yshift/coeff, name="Growth rate")) +
   scale_color_manual(values=c("Growing"="darkorange","Declining"=as.character(AAAS_palette["green1"])))+
-  scale_x_date(limits=as.Date(c("2020-03-01", "2020-12-01"), "%Y-%m-%d"), breaks="1 month",
+  scale_x_date(limits=as.Date(c("2020-03-01", end_plot), "%Y-%m-%d"), breaks="1 month",
                expand=c(0,0)) +
   export_theme+
   theme(legend.position="none",
@@ -107,10 +114,8 @@ p1 <-  ggplot(leb_dat)+
         axis.line.x=element_blank(),
         axis.ticks.x=element_blank()) +
   xlab("Date") +
-  ylab("New cases") +
+  ylab("Weekly rolling average of new cases") +
   labs(tag="A")
-p1
-
 
 
 ########################################
@@ -119,28 +124,26 @@ p1
 obs_dat_all <- read_csv(paste0(main_wd,"/data/RHUH_Ct_data.csv")) %>% rename(panther_Ct=Ct) %>%
   mutate(platform="Panther",first_pos=1) %>%
   mutate(id=1:n()) %>%
-  drop_na() %>%
-  filter(panther_Ct < 40) %>%
-  filter(Date > "2020-04-15")
+  filter(panther_Ct < 40)
+
+obs_dat1 <- obs_dat_all
 
 obs_dat1 <-  obs_dat_all %>% 
   filter(platform=="Panther" &
            first_pos %in% c(1,0)) %>%
-  filter(Date > "2020-04-15") %>% ## After biased symptomatic sampling time
+  filter(Date > "2020-04-15" & Date < end_date) %>% ## After biased symptomatic sampling time
   rename(date=Date) %>%
   left_join(epi_calendar) %>%
   dplyr::select(first_day,  panther_Ct, id) %>%
   mutate(first_day = as.numeric(first_day)) %>%
   mutate(first_day = first_day - min(first_day) + 35) %>% ## Start 35 days before first sample
-  #mutate(earliest_date=as.Date("2020-02-01")) %>%
-  #mutate(first_day = as.numeric(first_day - earliest_date)) %>% ## Assume 1st February is start date
   arrange(first_day) %>%
   rename(t = first_day, ct=panther_Ct)
 
 obs_dat_all <- obs_dat_all %>% 
   filter(platform=="Panther" &
            first_pos %in% c(1,0)) %>%
-  filter(Date > "2020-04-15") %>% ## After biased symptomatic sampling time
+  filter(Date > "2020-04-15" & Date < end_date) %>% ## After biased symptomatic sampling time
   rename(date=Date) %>%
   left_join(epi_calendar) %>%
   dplyr::select(first_day,  panther_Ct, id) %>%
@@ -173,74 +176,75 @@ p_dat <- ggplot(obs_dat_all) +
   export_theme +
   theme(axis.text.x=element_blank(), axis.title.x=element_blank(),
         axis.line.x = element_blank(), axis.ticks.x = element_blank()) +
-  scale_x_date(limits=as.Date(c("2020-04-15","2020-12-15")),breaks="1 month",expand=c(0,0)) +
+  # scale_x_date(limits=as.Date(c("2020-04-15",end_plot)),breaks="1 month",expand=c(0,0)) +
   xlab("Date of sample") +
   ylab("Ct value") +
-  labs(tag="C")
-p_dat
+  labs(tag="A")
 
-########################################
-## 5. Rt scatterplot
-########################################
-## Plot Ct data
-rhuh_data <- read_csv(paste0(main_wd,"/data/RHUH_Ct_data.csv")) %>% rename(panther_Ct=Ct) %>%
-  mutate(platform="Panther",first_pos=1) %>%
-  mutate(id=1:n())
-
-rhuh_data_use <-  rhuh_data %>% 
-  filter(platform=="Panther" &
-           first_pos %in% c(1,0)) %>%
-  rename(date=Date) %>%
-  left_join(epi_calendar)
-
-rhuh_data_week <- rhuh_data_use %>% 
-  group_by(date) %>% 
-  summarize(median_ct=median(panther_Ct),
-            skew_ct=moments::skewness(panther_Ct),
-            n=n())
-
-combined_dat <- rhuh_data_week %>% 
-  full_join(estimates$estimates$summarised %>% as_tibble() %>% 
-              filter(variable == "R") %>%
-              mutate(date = date)
-  ) %>%
-  arrange(date) %>% 
-  rename(mean_rt=mean) %>%
-  dplyr::select(date, median_ct,skew_ct, n, mean_rt) %>%
-  filter(n >= 10)
-
-combined_dat1 <- combined_dat %>% 
-  pivot_longer(-c(date,n)) %>%
-  left_join(epi_calendar) %>%
-  group_by(first_day, name) %>% 
-  summarize(mean=mean(value)) %>%
-  pivot_wider(values_from=mean,names_from=name)
-combined_dat1 <- combined_dat
-
-median_cts <- smooth(combined_dat$median_ct)
-skew_cts <- combined_dat$skew_ct
-Rt <- combined_dat$mean_rt
-ccf(median_cts, Rt,lag.max = 25)
-ccf(skew_cts, Rt,lag.max = 25)
-
-p_rt <- ggplot(combined_dat1 %>% rename(Rt=mean_rt)) +
-  geom_point(aes(x=skew_ct,y=median_ct,col=Rt),alpha=0.9,size=2) +
-  scale_color_gradient2(low="green",mid="blue",high="red",midpoint=1)+
-  scale_y_continuous(trans="reverse") +
-  xlab("Skewness of Ct distribution") +
-  ylab("Median of Ct distribution") +
-  export_theme + 
-  theme(legend.position=c(0.2,0.7)) + 
-  labs(tag="B")
+# ########################################
+# ## 5. Rt scatterplot
+# ########################################
+# ## Plot Ct data
+# rhuh_data <- read_csv(paste0(main_wd,"/data/RHUH_Ct_data.csv")) %>% rename(panther_Ct=Ct) %>%
+#   mutate(platform="Panther",first_pos=1) %>%
+#   mutate(id=1:n())
+# 
+# rhuh_data_use <-  rhuh_data %>% 
+#   filter(platform=="Panther" & first_pos %in% c(1,0)) %>%
+#   rename(date=Date)
+# 
+# rhuh_data_week <- rhuh_data_use %>% 
+#   group_by(date) %>% 
+#   summarize(median_ct=median(panther_Ct),
+#             skew_ct=moments::skewness(panther_Ct),
+#             n=n())
+# 
+# combined_dat <- rhuh_data_week %>% 
+#   full_join(estimates$estimates$summarised %>% as_tibble() %>% 
+#               filter(variable == "R") %>%
+#               mutate(date = date)
+#   ) %>%
+#   arrange(date) %>% 
+#   rename(mean_rt=mean) %>%
+#   dplyr::select(date, median_ct,skew_ct, n, mean_rt) %>%
+#   filter(n >= 10)
+# 
+# combined_dat1 <- combined_dat %>% 
+#   pivot_longer(-c(date,n)) %>%
+#   left_join(epi_calendar) %>%
+#   group_by(first_day, name) %>% 
+#   summarize(mean=mean(value)) %>%
+#   pivot_wider(values_from=mean,names_from=name)
+# combined_dat1 <- combined_dat
+# 
+# median_cts <- smooth(combined_dat$median_ct)
+# skew_cts <- combined_dat$skew_ct
+# Rt <- combined_dat$mean_rt
+# ccf(median_cts, Rt,lag.max = 25)
+# ccf(skew_cts, Rt,lag.max = 25)
+# 
+# p_rt <- ggplot(combined_dat1 %>% rename(Rt=mean_rt)) +
+#   geom_point(aes(x=skew_ct,y=median_ct,col=Rt),alpha=0.9,size=2) +
+#   scale_color_gradient2(low="green",mid="blue",high="red",midpoint=1)+
+#   scale_y_continuous(trans="reverse") +
+#   xlab("Skewness of Ct distribution") +
+#   ylab("Median of Ct distribution") +
+#   export_theme + 
+#   theme(legend.position=c(0.2,0.7)) + 
+#   labs(tag="B")
 
 ########################################
 ## 7. GP fit
 ########################################
-chains <- lazymcmc::load_mcmc_chains(chainwd_gp, parTab,FALSE,1,mcmcPars_ct_exp["adaptive_period"],
-                                     multi=FALSE,chainNo=TRUE,PTchain = FALSE)
+if(run_version == "gp"){
+  parTab <- bind_rows(parTab[parTab$names != "prob",], parTab[parTab$names == "prob",][1:length(times),])
+}
+
+chains <- lazymcmc::load_mcmc_chains(chainwd, parTab,FALSE,1,mcmcPars_ct["adaptive_period"],
+                                     multi=FALSE,chainNo=TRUE,PTchain=use_pt)
 chain <- as.data.frame(chains$chain)
 chain$sampno <- 1:nrow(chain)
-chain_comb <- chain
+chain_comb <- chain[chain$chain == 1,]
 chain_comb$sampno <- 1:nrow(chain_comb)
 
 times <- 0:max(obs_dat1$t)
@@ -248,9 +252,10 @@ times <- 0:max(obs_dat1$t)
 samps <- sample(unique(chain_comb$sampno),n_samp)
 gp_trajs <- matrix(0, nrow=n_samp,ncol=length(times))
 for(ii in seq_along(samps)){
-  tmp <- pmax(smooth.spline(gaussian_process_model(get_index_pars(chain_comb, samps[ii]),times))$y,0)
+  tmp_pars <- get_index_pars(chain_comb, samps[ii])
+  tmp <- pmax(smooth.spline(gaussian_process_model(tmp_pars,times))$y,-0.0000001)
   gp_trajs[ii,] <- tmp/sum(tmp)
-  #trajs[ii,] <- pmax(inc_func_use(get_index_pars(chain_comb, samps[ii]),times),0.0000001)
+  # trajs[ii,] <- pmax(gaussian_process_model(tmp_pars,times),-1.0000001)
 }
 
 gp_trajs1 <- t(apply(gp_trajs, 1, function(x) log(x[2:length(x)]/x[1:(length(x)-1)])))
@@ -260,7 +265,7 @@ gp_trajs1_quants$t <- 1:nrow(gp_trajs1_quants)
 colnames(gp_trajs1_quants) <- c("lower","median","upper","t")
 
 ## Growth rate plot
-p_gr <- ggplot(trajs1_quants) + geom_ribbon(aes(x=t,ymin=lower,ymax=upper),alpha=0.25) + 
+p_gr <- ggplot(gp_trajs1_quants) + geom_ribbon(aes(x=t,ymin=lower,ymax=upper),alpha=0.25) + 
   geom_line(aes(x=t,y=median)) + 
   coord_cartesian(ylim=c(-0.5,0.5))
 
@@ -271,20 +276,25 @@ gp_trajs_quants$t <- 1:nrow(gp_trajs_quants)
 colnames(gp_trajs_quants) <- c("lower","mid_lower","median","mid_upper","upper","t")
 
 ## Growth rate plot
-p_inc <- ggplot(gp_trajs_quants %>% left_join(date_key)) + 
+inc_data_comb <- gp_trajs_quants %>% left_join(date_key) %>% left_join(leb_dat)
+inc_data_comb$new_cases <- with(inc_data_comb, interp1(t, new_cases, t, "linear")) # interpolate missing values
+inc_data_comb$roll_mean <- with(inc_data_comb, interp1(t, roll_mean, t, "linear")) # interpolate missing values
+
+p_inc <- ggplot(inc_data_comb) + 
   geom_ribbon(aes(x=date,ymin=lower,ymax=upper),alpha=0.25,fill=AAAS_palette["red1"]) + 
   geom_ribbon(aes(x=date,ymin=mid_lower,ymax=mid_upper),alpha=0.5,fill=AAAS_palette["red1"]) + 
-  geom_line(aes(x=date,y=median),col=AAAS_palette["red1"]) + 
+  geom_line(aes(x=date,y=median),col=AAAS_palette["red1"],size=1.2) + 
   #geom_line(data=tibble(t=times,y=inc_func_use(get_best_pars(chain_comb),times)),aes(x=t,y=y),col="green") +
   #geom_line(data=tibble(t=1:200,y=(seir_dynamics$incidence/population_n)[1:200]),aes(x=t,y=y),col="red") +
+  geom_bar(aes(x=date,y=new_cases/sum(leb_dat$new_cases)),stat="identity",alpha=0.5,fill=AAAS_palette["grey1"]) +
+  # geom_line(aes(x=date,y=new_cases/sum(leb_dat$new_cases)),col=AAAS_palette["black"],size=0.6) +
   export_theme +
   ylab("Scaled probability of infection") +
   xlab("Date") +
-  scale_x_date(limits=as.Date(c("2020-04-01","2020-11-15")),breaks="1 month",expand=c(0,0)) +
-  coord_cartesian(ylim=c(-0.0001,0.025)) +
+  scale_x_date(limits=as.Date(c("2020-04-01",end_plot)),breaks="1 month",expand=c(0,0)) +
+  # coord_cartesian(ylim=c(-0.0001,0.025)) +
   scale_y_continuous(expand=c(0,0)) +
-  labs(tag="E")
-
+  labs(tag="B")
 
 ########################################
 ## 8. Growth rate comparison
@@ -339,8 +349,8 @@ p_grs <- ggplot() +
   geom_ribbon(data=trajs_dat_top,aes(x=date,ymin=lower,ymax=upper),alpha=0.25,fill=AAAS_palette["purple1"]) +
   geom_ribbon(data=trajs_dat_bot,aes(x=date,ymin=lower,ymax=upper),alpha=0.25,fill=AAAS_palette["purple1"]) +
   geom_line(data=trajs_dat_median,aes(x=date,y=median,col=is_grow,group=index)) +
-  coord_cartesian(ylim=c(-0.125,0.25)) +
-  scale_x_date(expand=c(0,0),limits=as.Date(c("2020-03-09", "2020-12-01"), "%Y-%m-%d"), 
+  coord_cartesian(ylim=c(-0.25,0.25)) +
+  scale_x_date(expand=c(0,0),limits=as.Date(c("2020-03-09", end_plot), "%Y-%m-%d"), 
                breaks=as.Date(c("2020-04-01","2020-07-01","2020-10-01"))) +
   geom_hline(yintercept=0,linetype="dashed",col=AAAS_palette["grey1"]) +
   scale_color_manual(values=c("R(t), growing"="darkorange",
@@ -359,21 +369,13 @@ p_grs <- ggplot() +
 ########################################
 ## 9. Pull together
 ########################################
-if(TRUE){
-  pdf("figures/Figure5.pdf",height=6,width=9)
-  (((p1/p_dat/((ps_all_daily | plot_spacer()))/p_inc) + plot_layout(heights=c(4,3.5,0.5,4))) | (((plot_spacer()|p_rt)+plot_layout(widths=c(1,50)))/p_use_dial/p_grs)) + plot_layout(widths=c(2,1))
-  dev.off()
-  
-  png("figures/Figure5.png",height=6,width=9,units="in",res=300)
-  (((p1/p_dat/((ps_all_daily | plot_spacer()))/p_inc) + plot_layout(heights=c(4,3.5,0.5,4))) | (((plot_spacer()|p_rt)+plot_layout(widths=c(1,50)))/p_use_dial/p_grs)) + plot_layout(widths=c(2,1))
-  dev.off()
-}
+
 if(save_plots){
-  pdf("figures/Figure5.pdf",height=6,width=9)
-  ((p1/p_dat/p_inc)| (((plot_spacer()|p_rt)+plot_layout(widths=c(1,50)))/p_use_dial/p_grs)) + plot_layout(widths=c(2,1))
+  pdf("figures/Figure5.pdf",height=6,width=6)
+  ((p_dat/p_inc))
   dev.off()
   
   png("figures/Figure5.png",height=6,width=9,units="in",res=300)
-  ((p1/p_dat/p_inc)| (((plot_spacer()|p_rt)+plot_layout(widths=c(1,50)))/p_use_dial/p_grs)) + plot_layout(widths=c(2,1))
+  ((p1/p_dat/p_inc)| (((plot_spacer()|p_rt)+plot_layout(widths=c(1,50)))/plot_spacer()/p_grs)) + plot_layout(widths=c(2,1))
   dev.off()
 }

@@ -112,4 +112,4 @@ if __name__ == "__main__":
         vargs += [[],]
 
     # set num_threads to one for serial processing
-    results = parallel_sampling(run_mcmc,vargs_iterator=vargs,vkwargs_iterator=vkwargs,num_threads=4)
+    results = parallel_sampling(run_mcmc,vargs_iterator=vargs,vkwargs_iterator=vkwargs,num_threads=8)

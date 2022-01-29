@@ -10,6 +10,9 @@ HOME_WD <- "C:/Users/Khalil/Desktop/repos"
 
 ## Where the MCMC chains are stored
 main_wd <- paste0(HOME_WD,"/virosolver_paper/")
+results_wd <- paste0(HOME_WD,"/virosolver_paper/results")
+
+if(!file.exists(results_wd)) dir.create(results_wd,recursive = TRUE)
 
 setwd(main_wd)
 
@@ -48,7 +51,6 @@ p1 <- leb_dat %>%
   xlab("Date") +
   ylab("New infections") +
   labs(tag="A")
-p1
 
 ## Rt estimation on these case counts
 rt_dat <- leb_dat %>% 
@@ -77,6 +79,6 @@ if(rerun){
                       control = list(adapt_delta = 0.95)),
                       horizon = 7)
 
-  saveRDS(estimates,"results/RHUH_rt_fit.RData")
+  saveRDS(estimates,paste0(results_wd,"/RHUH_rt_fit.RData"))
 }
   

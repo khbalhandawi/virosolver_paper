@@ -23,27 +23,43 @@ library(doParallel)
 #HOME_WD <- "~/Documents/GitHub/"
 HOME_WD <- "C:/Users/Khalil/Desktop/repos"
 
-## MCMC parameters for Ct model fits
-mcmcPars_ct <- c("iterations"=7000,"popt"=0.44,"opt_freq"=5000,
-                 "thin"=200,"adaptive_period"=3000,"save_block"=10000)
+# devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
+devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
-## MCMC parameters for Ct model fits if using parallel tempering branch
-n_temperatures <- 10
-mcmcPars_ct_pt <- c("iterations"=500000,"popt"=0.44,"opt_freq"=2000,
-                  "thin"=350,"adaptive_period"=200000,"save_block"=100,
-                  "temperature" = seq(1,101,length.out=n_temperatures),
-                  "parallel_tempering_iter" = 5,"max_adaptive_period" = 50000, 
-                  "adaptiveLeeway" = 0.2, "max_total_iterations" = 50000)
 rerun_mcmc <- TRUE
+use_pt <- TRUE
+cap_patients <- 1000
+p_patients <- 0.07
+end_date <- "2020-12-01"
+end_plot <- "2020-12-15"
+# end_date <- "2021-04-01"
+# end_plot <- "2021-04-15"
+
+## use parallel tempering
+if (use_pt){
+  devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
+  
+  ## MCMC parameters for Ct model fits if using parallel tempering branch
+  n_temperatures <- 10
+  # mcmcPars_ct <- list("iterations"=200000,"popt"=0.44,"opt_freq"=1000,
+  #                     "thin"=100,"adaptive_period"=100000,"save_block"=100,
+  #                     "temperature" = seq(1,101,length.out=n_temperatures),
+  #                     "parallel_tempering_iter" = 5,"max_adaptive_period" = 100000, 
+  #                     "adaptiveLeeway" = 0.2, "max_total_iterations" = 200000)
+  # 
+  mcmcPars_ct <- list("iterations"=50000,"popt"=0.44,"opt_freq"=1000,
+                      "thin"=1,"adaptive_period"=50000,"save_block"=100,
+                      "temperature" = seq(1,101,length.out=n_temperatures),
+                      "parallel_tempering_iter" = 5,"max_adaptive_period" = 50000, 
+                      "adaptiveLeeway" = 0.2, "max_total_iterations" = 50000)
+} else {
+  ## MCMC parameters for Ct model fits
+  mcmcPars_ct <- c("iterations"=200000,"popt"=0.44,"opt_freq"=2000,
+                   "thin"=350,"adaptive_period"=200000,"save_block"=100)
+}
 
 ## Arguments for this run, controlled by a csv file
 control_table <- read_csv(paste0(HOME_WD,"/virosolver_paper/pars/lebanon/sim_leb_control_use.csv"))
-#control_table <- read_excel(paste0(HOME_WD,"/virosolver_paper/pars/sim_ma_control.xlsx"))
-
-## Get task ID, used to read options from control table
-
-devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
-devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
 ## Priors for all models - EDIT THIS FILE TO CHANGE PRIORS!
 source(paste0(HOME_WD,"/virosolver_paper/code/priors.R"))
@@ -53,7 +69,8 @@ source(paste0(HOME_WD,"/virosolver_paper/code/plot_funcs.R"))
 args = commandArgs(trailingOnly=TRUE)
 
 ## Set random seed
-simno <- strtoi(args[1])
+# simno <- strtoi(args[1])
+simno <- 1
 set.seed(simno)
 
 ########################################
@@ -95,7 +112,7 @@ parTab <- read.csv(control_table$parTab_file[simno], stringsAsFactors=FALSE)
 ## 3. Final admin
 ########################################
 ## Fixed control parameters
-n_samp <- 30
+n_samp <- 500
 
 ## CHANGE TO MAIN WD and manage save locations
 chainwd <- paste0(top_chainwd,runname,"/",run_index,"/timepoint_",timepoint)
@@ -117,9 +134,29 @@ means <- parTab$values
 names(means) <- parTab$names
 
 ## Read in Ct data
-obs_dat <- read_csv(data_file_cts)
+obs_dat_all <- read_csv(data_file_cts) %>% rename(panther_Ct=Ct) %>%
+  mutate(platform="Panther",first_pos=1) %>%
+  mutate(id=1:n()) %>%
+  filter(panther_Ct < 40)
+
+obs_dat <-  obs_dat_all %>% 
+  filter(platform=="Panther" &
+           first_pos %in% c(1,0)) %>%
+  filter(Date > "2020-04-15" & Date < end_date) %>% ## After biased symptomatic sampling time
+  rename(date=Date) %>%
+  left_join(epi_calendar) %>%
+  dplyr::select(first_day,  panther_Ct, id) %>%
+  mutate(first_day = as.numeric(first_day)) %>%
+  mutate(first_day = first_day - min(first_day) + 35) %>% ## Start 35 days before first sample
+  arrange(first_day) %>%
+  rename(t = first_day, ct=panther_Ct) %>%
+  group_by(t) %>%
+  filter(row_number() < cap_patients) %>% 
+  do(top_n(.,as.integer(ceiling(p_patients*n())),id))
+
 ## Get possible observation times
 obs_times <- unique(obs_dat$t)
+n_days <- last(obs_dat$t)
 
 ## Cannot observe after the last observation time
 timepoint <- min(timepoint, length(obs_times))
@@ -140,7 +177,9 @@ if(!is.na(age_max)){
   obs_dat_use <- obs_dat_use %>% mutate(t = t - min(t),t = t + max_age)
 }
 
-## Vectors of times/infection ages for ismulation
+frac_days <- last(obs_dat_use$t) / last(obs_dat$t)
+
+## Vectors of times/infection ages for simulation
 ages <- 1:max(obs_dat_use$t)
 times <- 0:max(obs_dat_use$t)
 
@@ -193,7 +232,7 @@ if(rerun_mcmc){
                       INCIDENCE_FUNC=inc_func_use,
                       PRIOR_FUNC = prior_func_use,
                       solve_likelihood=TRUE,
-                      mcmcPars=mcmcPars_ct_pt,
+                      mcmcPars=mcmcPars_ct,
                       filename=paste0(chainwd,"/",runname,"_",run_index,"_",timepoint,"_chainno_",chainno),
                       CREATE_POSTERIOR_FUNC=create_posterior_func,
                       mvrPars=NULL,
@@ -215,9 +254,13 @@ trajs_smoothed <- matrix(0, nrow=n_samp,ncol=length(times))
 trajs_normal <- matrix(0, nrow=n_samp,ncol=length(times))
 for(ii in seq_along(samps)){
   ## Ensure these are all positive
-  trajs_smoothed[ii,] <- pmax(smooth.spline(inc_func_use(get_index_pars(chain_comb, samps[ii]),times))$y,0.0000001)
-  trajs_normal[ii,] <- pmax(inc_func_use(get_index_pars(chain_comb, samps[ii]),times),0.0000001)
+  tmp_smoothed <- pmax(smooth.spline(inc_func_use(get_index_pars(chain_comb, samps[ii]),times))$y,0.0000001)
+  tmp_normal <- pmax(inc_func_use(get_index_pars(chain_comb, samps[ii]),times),0.0000001)
+  
+  trajs_smoothed[ii,] <- (tmp_smoothed/sum(tmp_smoothed)) * frac_days
+  trajs_normal[ii,] <- (tmp_normal/sum(tmp_normal)) * frac_days
 }
+
 ## Get daily growth rate from smoothed version, find quantiles
 trajs1 <- t(apply(trajs_smoothed, 1, function(x) log(x[2:length(x)]/x[1:(length(x)-1)])))
 trajs1_quants <- t(apply(trajs1, 2, function(x) quantile(x,c(0.025,0.5,0.975))))
@@ -241,17 +284,17 @@ p_dat <- ggplot(obs_dat_use %>% filter(ct < pars["intercept"])) +
   geom_violin(aes(x=t,group=t,y=ct),scale="width",fill="grey70",draw_quantiles=c(0.025,0.5,0.975)) + 
   scale_y_continuous(trans="reverse") +
   export_theme +
-  scale_x_continuous(limits=c(0,260))
+  scale_x_continuous(limits=c(0,n_days+5))
 
 ## Incidence rate plot
 p_inc <- ggplot(trajs_quants) + geom_ribbon(aes(x=t,ymin=lower,ymax=upper),alpha=0.25) + 
   geom_line(aes(x=t,y=median)) + 
   geom_line(data=tibble(t=times,y=inc_func_use(get_best_pars(chain_comb),times)),aes(x=t,y=y),col="green") +
-  #geom_line(data=tibble(t=1:260,y=(seir_dynamics$incidence/population_n)[1:260]),aes(x=t,y=y),col="red") +
+  #geom_line(data=tibble(t=1:,n_days,y=(seir_dynamics$incidence/population_n)[1:,n_days]),aes(x=t,y=y),col="red") +
   export_theme +
   ylab("Per capita incidence") +
   xlab("Days since start") +
-  scale_x_continuous(limits=c(0,260)) +
+  scale_x_continuous(limits=c(0,n_days+5)) +
   coord_cartesian(ylim=c(0,0.025))
 
 ## Get viral load trajectories

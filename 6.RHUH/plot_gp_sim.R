@@ -22,6 +22,9 @@ library(lazymcmc) ## devtools::install_github("jameshay218/lazymcmc")
 library(doParallel)
 library(magick)
 library(gganimate)
+library(zoo)
+library(pracma)
+
 HOME_WD <- "C:/Users/Khalil/Desktop/repos"
 devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
@@ -30,8 +33,20 @@ source(paste0(HOME_WD,"/virosolver_paper/code/priors.R"))
 source(paste0(HOME_WD,"/virosolver_paper/code/plot_funcs.R"))
 
 ## MCMC parameters for Ct model fits
-mcmcPars_ct <- c("iterations"=7000,"popt"=0.44,"opt_freq"=5000,
-                 "thin"=200,"adaptive_period"=3000,"save_block"=10000)
+mcmcPars_ct <- c("adaptive_period"=200000)
+
+use_pt <- TRUE
+
+cap_patients <- 200
+p_patients <- 1.0
+end_date <- "2020-12-01"
+end_plot <- "2020-12-15"
+# end_date <- "2021-04-01"
+# end_plot <- "2021-04-15"
+
+if (use_pt) {
+  devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
+}
 
 ## Arguments for this run, controlled by a csv file
 control_table <- read_csv(paste0(HOME_WD,"/virosolver_paper/pars/lebanon/sim_leb_control_use.csv"))
@@ -40,8 +55,8 @@ ps <- NULL
 trajs_quants_all <- NULL
 obs_dat_use_all <- NULL
 ## Get task ID, used to read options from control table
-for(index in 1:10){
-  simno <- index#as.numeric(Sys.getenv('SLURM_ARRAY_TASK_ID'))
+for(index in 1:27){
+  simno <- index
   ## Set random seed
   set.seed(simno)
   
@@ -78,17 +93,16 @@ for(index in 1:10){
   age_max <- control_table$age_max[simno]
   
   ## Most importantly, where is the parameter control table stored?
-  parTab <- read.csv(paste0(HOME_WD,"/virosolver_paper/pars/lebanon/partab_gp_model.csv"), stringsAsFactors=FALSE)
+  parTab <- read.csv(control_table$parTab_file[simno], stringsAsFactors=FALSE)
   
   ########################################
   ## 3. Final admin
   ########################################
   ## Fixed control parameters
-  n_samp <- 30
+  n_samp <- 500
   
   ## CHANGE TO MAIN WD and manage save locations
   chainwd <- paste0(top_chainwd,runname,"/",run_index,"/timepoint_",timepoint)
-  # chainwd <- paste0(top_chainwd,"timepoint_",timepoint)
   plot_wd <- paste0(top_plotwd,runname,"/",run_index)
   setwd(HOME_WD)
   
@@ -104,9 +118,29 @@ for(index in 1:10){
   names(means) <- parTab$names
   
   ## Read in Ct data
-  obs_dat <- read_csv(data_file_cts)
+  obs_dat_all <- read_csv(data_file_cts) %>% rename(panther_Ct=Ct) %>%
+    mutate(platform="Panther",first_pos=1) %>%
+    mutate(id=1:n()) %>%
+    filter(panther_Ct < 40)
+  
+  obs_dat <-  obs_dat_all %>% 
+    filter(platform=="Panther" &
+             first_pos %in% c(1,0)) %>%
+    filter(Date > "2020-04-15" & Date < end_date) %>% ## After biased symptomatic sampling time
+    rename(date=Date) %>%
+    left_join(epi_calendar) %>%
+    dplyr::select(first_day,  panther_Ct, id) %>%
+    mutate(first_day = as.numeric(first_day)) %>%
+    mutate(first_day = first_day - min(first_day) + 35) %>% ## Start 35 days before first sample
+    arrange(first_day) %>%
+    rename(t = first_day, ct=panther_Ct) %>%
+    group_by(t) %>%
+    filter(row_number() < cap_patients) %>% 
+    do(top_n(.,as.integer(ceiling(p_patients*n())),id))
+  
   ## Get possible observation times
   obs_times <- unique(obs_dat$t)
+  n_days <- last(obs_dat$t)
   
   ## Cannot observe after the last observation time
   timepoint <- min(timepoint, length(obs_times))
@@ -127,13 +161,13 @@ for(index in 1:10){
     obs_dat_use <- obs_dat_use %>% mutate(t = t - min(t),t = t + age_max)
   }
   
+  frac_days <- last(obs_dat_use$t) / last(obs_dat$t)
+  
   ## Vectors of times/infection ages for simulation
   ages <- 1:max(obs_dat_use$t)
   times <- 0:max(obs_dat_use$t)
   
   ## This is for the GP version
-  mat <- matrix(rep(times, each=length(times)),ncol=length(times))
-  t_dist <- abs(apply(mat, 2, function(x) x-times))
   if(model_version == "gp"){
     parTab <- bind_rows(parTab[parTab$names != "prob",], parTab[parTab$names == "prob",][1:length(times),])
     pars <- parTab$values
@@ -147,13 +181,6 @@ for(index in 1:10){
   ## Epidemic cannot start after first observation time
   parTab[parTab$names == "t0",c("upper_bound","upper_start")] <- min(obs_dat_use$t)
   
-  ## Test that model works with these settings
-  f <- create_posterior_func(parTab, obs_dat_use, prior_func_use, 
-                             inc_func_use,solve_ver="likelihood",
-                             use_pos=use_pos,
-                             t_dist=t_dist)
-  f(pars)
-  
   ########################################
   ## 6. Check MCMC run
   ########################################    
@@ -161,12 +188,12 @@ for(index in 1:10){
   
   chains_check <- load_mcmc_chains(chainwd,parTab,unfixed=TRUE,multi=FALSE,
                              burnin=mcmcPars_ct["adaptive_period"],
-                             chainNo=FALSE)
+                             chainNo=FALSE,PTchain=use_pt)
   # print(paste0("Rerun? ", gelman_diagnostics(chains_check$list)$Rerun))
   
   chains <- load_mcmc_chains(chainwd,parTab,unfixed=FALSE,multi=FALSE,
                              burnin=mcmcPars_ct["adaptive_period"],
-                             chainNo=FALSE)
+                             chainNo=FALSE,PTchain=use_pt)
   chain <- as.data.frame(chains$chain)
   chain$sampno <- 1:nrow(chain)
   chain1 <- chain
@@ -180,8 +207,11 @@ for(index in 1:10){
   trajs_normal <- matrix(0, nrow=n_samp,ncol=length(times))
   for(ii in seq_along(samps)){
     ## Ensure these are all positive
-    trajs_smoothed[ii,] <- pmax(smooth.spline(inc_func_use(get_index_pars(chain_comb, samps[ii]),times))$y,0.0000001)
-    trajs_normal[ii,] <- pmax(inc_func_use(get_index_pars(chain_comb, samps[ii]),times),0.0000001)
+    tmp_smoothed <- pmax(smooth.spline(inc_func_use(get_index_pars(chain_comb, samps[ii]),times))$y,0.0000001)
+    tmp_normal <- pmax(inc_func_use(get_index_pars(chain_comb, samps[ii]),times),0.0000001)
+    
+    trajs_smoothed[ii,] <- (tmp_smoothed/sum(tmp_smoothed)) * frac_days
+    trajs_normal[ii,] <- (tmp_normal/sum(tmp_normal)) * frac_days
   }
   ## Get daily growth rate from smoothed version, find quantiles
   trajs1 <- t(apply(trajs_smoothed, 1, function(x) log(x[2:length(x)]/x[1:(length(x)-1)])))
@@ -209,10 +239,12 @@ for(index in 1:10){
                  binwidth=1,stackdir="center",binpositions="all",dotsize=0.25) +
     scale_y_continuous(trans="reverse") +
     export_theme +
-    scale_x_continuous(limits=c(0,265))
+    scale_x_continuous(limits=c(0,n_days+5))
   
   # To do get true incidence rate
-  seir_outputs <- read_csv(paste0(HOME_WD,"/virosolver_paper/data/LEB_OBS/LEB_gp_incidence.csv"))
+  leb_dat <- read_csv(paste0(HOME_WD,"/virosolver_paper/data/RHUH_cases_data.csv")) %>%
+    mutate(roll_mean=rollmean(new_cases, 7,fill=NA,align="right")) %>%
+    filter(date > "2020-04-15" & date < end_date) ## After biased symptomatic sampling time
   trajs_quants$frame <- timepoint
   trajs_quants_all <- bind_rows(trajs_quants_all, trajs_quants)
   ## Incidence rate plot
@@ -226,7 +258,7 @@ for(index in 1:10){
                  binwidth=1,stackdir="center",binpositions="all",dotsize=0.25) +
     scale_y_continuous(trans="reverse") +
     export_theme +
-    scale_x_continuous(limits=c(0,265))
+    scale_x_continuous(limits=c(0,n_days+5))
   
   obs_dat_use$frame <- timepoint
   
@@ -240,11 +272,11 @@ for(index in 1:10){
     geom_ribbon(aes(x=t,ymin=lower_50,ymax=upper_50),alpha=0.5,fill=AAAS_palette["blue1"]) + 
     geom_line(aes(x=t,y=median)) + 
     #geom_line(data=tibble(t=times,y=inc_func_use(get_best_pars(chain_comb),times)),aes(x=t,y=y),col="green") +
-    geom_line(data=tibble(t=1:260,y=(seir_outputs$new_cases/10000000)[1:260]),aes(x=t,y=y),col=AAAS_palette["red1"]) +
+    geom_line(data=tibble(t=1:n_days,y=(leb_dat$new_cases/sum(leb_dat$new_cases))[1:n_days]),aes(x=t,y=y),col=AAAS_palette["red1"]) +
     export_theme +
     ylab("Per capita incidence") +
     xlab("Days since start") #+
-    #scale_x_continuous(limits=c(0,265)) #+
+    #scale_x_continuous(limits=c(0,n_days+5)) #+
     # coord_cartesian(ylim=c(0,0.003))
    ps[[index]] <- p_inc
 }
@@ -256,7 +288,7 @@ p_dat <-  ggplot(obs_dat_use_all) +
                binwidth=1,stackdir="center",binpositions="all",dotsize=0.25) +
   scale_y_continuous(trans="reverse") +
   export_theme +
-  scale_x_continuous(limits=c(0,265)) +
+  scale_x_continuous(limits=c(0,n_days+5)) +
   labs(x = 'Days since start', y = 'Ct value') +
   theme(axis.text=element_text(size=8),axis.title=element_text(size=10)) +
   transition_time(frame) +
@@ -266,12 +298,12 @@ p_comb <- ggplot(trajs_quants_all) +
   geom_ribbon(aes(x=t,ymin=lower_95,ymax=upper_95),alpha=0.25,fill=AAAS_palette["blue1"]) + 
   geom_ribbon(aes(x=t,ymin=lower_50,ymax=upper_50),alpha=0.5,fill=AAAS_palette["blue1"]) + 
   geom_line(aes(x=t,y=median),col=AAAS_palette["blue1"]) + 
-  geom_line(data=tibble(t=1:260,y=(seir_outputs$new_cases/10000000)[1:260]),aes(x=t,y=y),col=AAAS_palette["red1"]) + 
+  geom_line(data=tibble(t=1:n_days,y=(leb_dat$new_cases/sum(leb_dat$new_cases))[1:n_days]),aes(x=t,y=y),col=AAAS_palette["red1"]) + 
   geom_vline(data=obs_dat_use_all,aes(xintercept=t),linetype="dashed") +
   export_theme +
   ylab("Per capita incidence") +
   xlab("Days since start") +
-  scale_x_continuous(limits=c(0,265)) +
+  scale_x_continuous(limits=c(0,n_days+5)) +
   scale_y_continuous(expand=c(0,0)) +
   # coord_cartesian(ylim=c(0,0.0065)) +
   labs(x = 'Days since start', y = 'Per capita incidence') +
