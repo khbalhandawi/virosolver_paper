@@ -18,9 +18,10 @@ library(fitdistrplus)
 library(deSolve)
 library(lazymcmc) ## devtools::install_github("jameshay218/lazymcmc")
 library(doParallel)
+library(zoo)
 
 #HOME_WD <- "~/"
-HOME_WD <- "C:/Users/Khalil/Desktop/repos"
+HOME_WD <- Sys.getenv("GITDIR")
 devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
 ## Arguments for this run
@@ -30,12 +31,14 @@ n_samp <- 1000
 use_pt <- TRUE
 
 cap_patients <- 1000
-p_patients <- 0.07
+p_patients <- 0.1
 run_version <- "gp" ##gp, seir or exp##
 # runname <- "rhuh_gp_cap.og"
 # end_date <- "2020-12-01"
 # end_plot <- "2020-12-15"
-runname <- "rhuh_gp_cap.unseen"
+runname <- "rhuh_gp_cap.unseen.3"
+start_date <- "2020-04-15"
+start_plot <- "2020-04-15"
 end_date <- "2021-04-01"
 end_plot <- "2021-04-15"
 
@@ -44,8 +47,7 @@ end_plot <- "2021-04-15"
 ## must move to the correct working directory to source the model functions
 main_wd <- paste0(HOME_WD,"/virosolver_paper/")
 chainwd <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/5.real_leb_ct/",runname)
-plot_wd <- paste0(HOME_WD,"/virosolver_paper/plots/5.real_leb_ct/",runname)
-results_wd <- paste0(HOME_WD,"/virosolver_paper/results")
+results_wd <- paste0(HOME_WD,"/virosolver_paper/results/",runname)
 setwd(main_wd)
 
 if (use_pt) {
@@ -53,7 +55,11 @@ if (use_pt) {
 }
 
 ## MCMC parameters for Ct model fits
-mcmcPars_ct <- c("adaptive_period"=200000)
+if (use_pt) {
+  mcmcPars_ct <- c("adaptive_period"=50000)
+} else {
+  mcmcPars_ct <- c("adaptive_period"=200000)
+}
                   
 ## Code for plotting
 source("code/plot_funcs.R")
@@ -61,7 +67,6 @@ source("code/plot_funcs.R")
 source("code/priors_tighter.R")
 
 if(!file.exists(chainwd)) dir.create(chainwd,recursive = TRUE)
-if(!file.exists(plot_wd)) dir.create(plot_wd,recursive = TRUE)
 if(!file.exists(results_wd)) dir.create(results_wd,recursive = TRUE)
 
 ########################################
@@ -86,7 +91,7 @@ obs_dat1 <- obs_dat_all
 obs_dat1 <-  obs_dat_all %>% 
   filter(platform=="Panther" &
            first_pos %in% c(1,0)) %>%
-  filter(Date > "2020-04-15" & Date < end_date) %>% ## After biased symptomatic sampling time
+  filter(Date > start_date & Date < end_date) %>% ## After biased symptomatic sampling time
   rename(date=Date) %>%
   left_join(epi_calendar) %>%
   dplyr::select(first_day,  panther_Ct, id) %>%
@@ -101,7 +106,7 @@ obs_dat1 <-  obs_dat_all %>%
 obs_dat_all <- obs_dat_all %>% 
   filter(platform=="Panther" &
            first_pos %in% c(1,0)) %>%
-  filter(Date > "2020-04-15" & Date < end_date) %>% ## After biased symptomatic sampling time
+  filter(Date > start_date & Date < end_date) %>% ## After biased symptomatic sampling time
   rename(date=Date) %>%
   left_join(epi_calendar) %>%
   dplyr::select(first_day,  panther_Ct, id) %>%
@@ -128,7 +133,7 @@ p_dat <- ggplot(obs_dat_all %>% filter(ct < 40)) +
   geom_violin(aes(x=date,group=date,y=ct),scale="width",fill="grey70",draw_quantiles=c(0.025,0.5,0.975)) + 
   scale_y_continuous(trans="reverse") +
   export_theme +
-  # scale_x_date(limits=as.Date(c("2020-04-15",end_plot)),breaks="1 month",NA) +
+  # scale_x_date(limits=as.Date(c(start_plot,end_plot)),breaks="1 month",NA) +
   xlab("Date of sample") +
   ylab("Detectable Ct")
 p_dat
@@ -145,15 +150,17 @@ if(run_version == "gp"){
 
 ## Run for each chain
 source("6.RHUH/6.add_prior.R")
-chains_diag <- lazymcmc::load_mcmc_chains(chainwd, parTab,TRUE,1,mcmcPars_ct["adaptive_period"]/10,
-                                          multi=FALSE,chainNo=FALSE,PTchain=use_pt)
-
-pdf(paste0(plot_wd,"/",runname,"_mcmc_trace.pdf"))
-plot(chains_diag$list)
-dev.off()
-
-gelman_diagnostics(chains_diag$list)
-chains <- lazymcmc::load_mcmc_chains(chainwd, parTab,FALSE,1,mcmcPars_ct["adaptive_period"]/10,
+# chains_diag <- lazymcmc::load_mcmc_chains(chainwd, parTab,TRUE,1,mcmcPars_ct["adaptive_period"],
+#                                           multi=FALSE,chainNo=FALSE,PTchain=use_pt)
+# 
+# pdf(paste0(results_wd,"/mcmc_trace.pdf"))
+# plot(chains_diag$list)
+# dev.off()
+# 
+# if (!use_pt) {
+#   gelman_diagnostics(chains_diag$list)
+# }
+chains <- lazymcmc::load_mcmc_chains(chainwd, parTab,FALSE,1,mcmcPars_ct["adaptive_period"],
                                      multi=FALSE,chainNo=TRUE,PTchain=use_pt)
 chain <- as.data.frame(chains$chain)
 chain$sampno <- 1:nrow(chain)
@@ -292,8 +299,8 @@ p_bot <-  p_lhs | p_rhs + plot_layout(widths=c(2,1))
 p_supp <- p_dist_fits[[1]]/p_dist_fits[[2]]/ p_bot + plot_layout(heights=c(1,1,3),ncol=1)
 
 if(TRUE) {
-  ggsave(filename="figures/rhuh_mcmc.pdf",plot=p_supp,height=8,width=12)
-  ggsave(filename="figures/rhuh_mcmc.png",plot=p_supp,height=8,width=12,units="in",dpi=300)
+  ggsave(filename=paste0(results_wd,"/rhuh_mcmc.pdf"),plot=p_supp,height=8,width=12)
+  ggsave(filename=paste0(results_wd,"/rhuh_mcmc.png"),plot=p_supp,height=8,width=12,units="in",dpi=300)
 }
 
 obs_dat_all <- obs_dat_all %>% left_join(obs_dat_all %>% group_by(date) %>% tally())
@@ -334,6 +341,7 @@ p_inc <- ggplot(trajs_quants) +
   ylab("Relative probability of infection") +
   xlab("Date") +
   scale_x_date(limits=as.Date(c("2020-03-01",end_plot)),breaks="1 month",expand=c(0,0)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   #coord_cartesian(ylim=c(-0.0001,0.005)) +
   scale_y_continuous(expand=c(0,0))  +
   labs(tag="C")
@@ -343,7 +351,7 @@ p_inc <- ggplot(trajs_quants) +
 leb_dat <- read_csv("data/RHUH_cases_data.csv")
 
 p_leb <- ggplot(leb_dat) + 
-  geom_bar(aes(x=date,y=new_cases/sum(new_cases)),stat="identity", width=0.6) +
+  geom_bar(aes(x=date,y=new_cases/sum(new_cases)),stat="identity", width=0.4,alpha=0.5) +
   export_theme +
   theme(axis.text.x=element_blank(), axis.title.x=element_blank(), 
         axis.line.x = element_blank(), axis.ticks.x = element_blank()) +
@@ -353,7 +361,56 @@ p_leb <- ggplot(leb_dat) +
   ylab("Number of cases") +
   labs(tag="A")
 
-pdf(paste0(main_wd,"/figures/",runname,".pdf"),height=7,width=8)
+########################################
+## 4. Calculate mean squared error
+########################################
+
+#create data frame with a column of actual values and a column of predicted values
+ground_truth <- leb_dat %>%
+  filter(date >= first(trajs1_quants$date) & date <= last(trajs1_quants$date)) %>%
+  complete(date = seq.Date(min(date), max(date), by="day")) %>%
+  fill('new_cases') %>%
+  mutate(prob = new_cases/sum(new_cases)) %>%
+  mutate(roll_mean=rollmean(prob, 7,fill=NA,align="left"))
+
+prediction <- trajs_quants %>%
+  filter(date <= last(ground_truth$date))
+
+comp <- data.frame(pred = prediction$median, 
+                   lower = prediction$lower, 
+                   upper = prediction$upper, 
+                   mid_lower = prediction$mid_lower, 
+                   mid_upper = prediction$mid_upper, 
+                   actual = ground_truth$prob, 
+                   actual_avg = ground_truth$roll_mean,
+                   date = ground_truth$date)
+
+#calculate MSE
+error <- mean((comp$actual - comp$pred)^2, na.rm=TRUE)
+
+p_error <- ggplot(comp) +
+  geom_ribbon(aes(x=date,ymin=lower,ymax=upper),alpha=0.25,fill=AAAS_palette["blue1"]) + 
+  geom_ribbon(aes(x=date,ymin=mid_lower,ymax=mid_upper),alpha=0.5,fill=AAAS_palette["blue1"]) + 
+  geom_line(aes(x=date,y=pred),col=AAAS_palette["blue1"]) + 
+  geom_bar(aes(x=date,y=actual),stat="identity", width=0.4,alpha=0.25) +
+  geom_line(aes(x=date,y=actual_avg),col=AAAS_palette["red1"]) + 
+  export_theme +
+  ylab("Relative probability of infection") +
+  xlab("Date") +
+  scale_x_date(limits=as.Date(c("2020-03-01",end_plot)),breaks="1 month",expand=c(0,0)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  #coord_cartesian(ylim=c(-0.0001,0.005)) +
+  scale_y_continuous(expand=c(0,0))
+
+if(TRUE){
+  ggsave(filename=paste0(results_wd,"/error_plot.pdf"),plot=p_error,height=6,width=6)
+  ggsave(filename=paste0(results_wd,"/error_plot.png"),plot=p_error,height=6,width=6,units="in",dpi=300)
+}
+
+# Write MSE error to file
+write.csv(error,paste0(results_wd,"/error.csv"))
+
+pdf(paste0(results_wd,"/final_plot.pdf"),height=7,width=8)
 p_leb/p_dat/p_inc 
 dev.off()
 

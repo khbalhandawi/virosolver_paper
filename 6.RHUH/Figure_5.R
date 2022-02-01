@@ -19,7 +19,7 @@ library(zoo)
 library(pracma)
 
 #HOME_WD <- "~/"
-HOME_WD <- "C:/Users/Khalil/Desktop/repos"
+HOME_WD <- Sys.getenv("GITDIR")
 devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
 ## Where the MCMC chains are stored
@@ -49,15 +49,19 @@ end_plot <- "2020-12-15"
 chainwd <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/5.real_leb_ct/",runname)
 results_wd <- paste0(HOME_WD,"/virosolver_paper/results")
 
-## MCMC parameters for Ct model fits
-mcmcPars_ct <- c("adaptive_period"=200000)
-
-## GP model parameters for fitting
-parTab <- read.csv(paste0(main_wd,"/pars/lebanon/partab_gp_model.csv"))
-
 if (use_pt) {
   devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
 }
+
+## MCMC parameters for Ct model fits
+if (use_pt) {
+  mcmcPars_ct <- c("adaptive_period"=50000)
+} else {
+  mcmcPars_ct <- c("adaptive_period"=200000)
+}
+
+## GP model parameters for fitting
+parTab <- read.csv(paste0(main_wd,"/pars/lebanon/partab_gp_model.csv"))
 
 ########################################
 ## 3. MA incidence plot and Rt
@@ -291,7 +295,8 @@ p_inc <- ggplot(inc_data_comb) +
   export_theme +
   ylab("Scaled probability of infection") +
   xlab("Date") +
-  scale_x_date(limits=as.Date(c("2020-04-01",end_plot)),breaks="1 month",expand=c(0,0)) +
+  scale_x_date(limits=as.Date(c("2020-04-01",end_plot)),breaks="2 weeks",expand=c(0,0)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   # coord_cartesian(ylim=c(-0.0001,0.025)) +
   scale_y_continuous(expand=c(0,0)) +
   labs(tag="B")
@@ -371,11 +376,12 @@ p_grs <- ggplot() +
 ########################################
 
 if(save_plots){
-  pdf("figures/Figure5.pdf",height=6,width=6)
-  ((p_dat/p_inc))
-  dev.off()
+  ggsave(paste0(main_wd,"/figures/Figure5.pdf"),
+         plot = ((p_dat/p_inc)),
+         device = cairo_pdf,
+         dpi = 320,height=6,width=6)
   
-  png("figures/Figure5.png",height=6,width=9,units="in",res=300)
-  ((p1/p_dat/p_inc)| (((plot_spacer()|p_rt)+plot_layout(widths=c(1,50)))/plot_spacer()/p_grs)) + plot_layout(widths=c(2,1))
+  png("figures/Figure5.png",height=6,width=6,units="in",res=300)
+  ((p_dat/p_inc))
   dev.off()
 }

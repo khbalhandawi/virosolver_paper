@@ -1,3 +1,8 @@
+# library(extrafont)
+# loadfonts(device = "win")
+
+# font_family <- "LM Roman 10"
+font_family <- "sans"
 
 ## Create an epiweek calendar
 dates <- seq(as.Date("2020-01-01"),as.Date("2021-04-01"),by="1 day")
@@ -8,26 +13,26 @@ epi_calendar <- epi_calendar %>% group_by(week) %>% mutate(first_day=min(date))
 
 export_theme <- theme_tufte() +
   theme(
-    axis.text.x = element_text(size=7,family="sans"),
-    axis.text.y=element_text(size=7,family="sans"),
-    axis.title.x=element_text(size=8,family="sans",vjust=-1),
-    axis.title.y=element_text(size=8,family="sans"),
+    axis.text.x = element_text(size=7,family=font_family),
+    axis.text.y=element_text(size=7,family=font_family),
+    axis.title.x=element_text(size=8,family=font_family,vjust=-1),
+    axis.title.y=element_text(size=8,family=font_family),
 
     ## Axis lines
     axis.line = element_line(colour="black"),
     axis.ticks = element_line(),
 
     ## Title
-    plot.title = element_text(family="sans",size=8,face="bold",hjust=0.5),
-    plot.tag = element_text(family="sans",size=10,face="bold"),
+    plot.title = element_text(family=font_family,size=8,face="bold",hjust=0.5),
+    plot.tag = element_text(family=font_family,size=10,face="bold"),
 
     ## Legends
-    legend.title=element_text(size=8,family="sans",face="italic"),
-    legend.text=element_text(size=8,family="sans"),
+    legend.title=element_text(size=8,family=font_family,face="italic"),
+    legend.text=element_text(size=8,family=font_family),
     legend.key.size= unit(0.5, "cm"),
     legend.margin = margin(0,0,0,0, "cm"),
     ## Strips for facet_wrap
-    strip.text=element_text(size=8,family="sans",face="bold"),
+    strip.text=element_text(size=8,family=font_family,face="bold"),
     #strip.background=element_rect(fill="#f0f0f0")
     strip.background=element_blank()
     )

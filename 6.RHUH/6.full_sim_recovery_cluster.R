@@ -21,7 +21,7 @@ library(deSolve)
 library(lazymcmc) ## devtools::install_github("jameshay218/lazymcmc")
 library(doParallel)
 #HOME_WD <- "~/Documents/GitHub/"
-HOME_WD <- "C:/Users/Khalil/Desktop/repos"
+HOME_WD <- Sys.getenv("GITDIR")
 
 # devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
 devtools::load_all(paste0(HOME_WD,"/virosolver"))
@@ -29,9 +29,14 @@ devtools::load_all(paste0(HOME_WD,"/virosolver"))
 rerun_mcmc <- TRUE
 use_pt <- TRUE
 cap_patients <- 1000
-p_patients <- 0.07
+p_patients <- 0.1
+start_date <- "2020-04-15"
+start_plot <- "2020-04-15"
 end_date <- "2020-12-01"
 end_plot <- "2020-12-15"
+
+# start_date <- "2020-06-01"
+# start_plot <- "2020-04-15"
 # end_date <- "2021-04-01"
 # end_plot <- "2021-04-15"
 
@@ -48,7 +53,7 @@ if (use_pt){
   #                     "adaptiveLeeway" = 0.2, "max_total_iterations" = 200000)
   # 
   mcmcPars_ct <- list("iterations"=50000,"popt"=0.44,"opt_freq"=1000,
-                      "thin"=1,"adaptive_period"=50000,"save_block"=100,
+                      "thin"=5,"adaptive_period"=50000,"save_block"=100,
                       "temperature" = seq(1,101,length.out=n_temperatures),
                       "parallel_tempering_iter" = 5,"max_adaptive_period" = 50000, 
                       "adaptiveLeeway" = 0.2, "max_total_iterations" = 50000)
@@ -69,8 +74,7 @@ source(paste0(HOME_WD,"/virosolver_paper/code/plot_funcs.R"))
 args = commandArgs(trailingOnly=TRUE)
 
 ## Set random seed
-# simno <- strtoi(args[1])
-simno <- 1
+simno <- strtoi(args[1])
 set.seed(simno)
 
 ########################################
@@ -142,7 +146,7 @@ obs_dat_all <- read_csv(data_file_cts) %>% rename(panther_Ct=Ct) %>%
 obs_dat <-  obs_dat_all %>% 
   filter(platform=="Panther" &
            first_pos %in% c(1,0)) %>%
-  filter(Date > "2020-04-15" & Date < end_date) %>% ## After biased symptomatic sampling time
+  filter(Date > start_date & Date < end_date) %>% ## After biased symptomatic sampling time
   rename(date=Date) %>%
   left_join(epi_calendar) %>%
   dplyr::select(first_day,  panther_Ct, id) %>%

@@ -25,7 +25,7 @@ library(gganimate)
 library(zoo)
 library(pracma)
 
-HOME_WD <- "C:/Users/Khalil/Desktop/repos"
+HOME_WD <- Sys.getenv("GITDIR")
 devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
 ## Priors for all models - EDIT THIS FILE TO CHANGE PRIORS!
@@ -37,10 +37,16 @@ mcmcPars_ct <- c("adaptive_period"=200000)
 
 use_pt <- TRUE
 
-cap_patients <- 200
-p_patients <- 1.0
+cap_patients <- 1000
+p_patients <- 0.1
+
+start_date <- "2020-04-15"
+start_plot <- "2020-04-15"
 end_date <- "2020-12-01"
 end_plot <- "2020-12-15"
+
+# start_date <- "2020-06-01"
+# start_plot <- "2020-04-15"
 # end_date <- "2021-04-01"
 # end_plot <- "2021-04-15"
 
@@ -103,7 +109,6 @@ for(index in 1:27){
   
   ## CHANGE TO MAIN WD and manage save locations
   chainwd <- paste0(top_chainwd,runname,"/",run_index,"/timepoint_",timepoint)
-  plot_wd <- paste0(top_plotwd,runname,"/",run_index)
   setwd(HOME_WD)
   
   ########################################
@@ -126,7 +131,7 @@ for(index in 1:27){
   obs_dat <-  obs_dat_all %>% 
     filter(platform=="Panther" &
              first_pos %in% c(1,0)) %>%
-    filter(Date > "2020-04-15" & Date < end_date) %>% ## After biased symptomatic sampling time
+    filter(Date > start_date & Date < end_date) %>% ## After biased symptomatic sampling time
     rename(date=Date) %>%
     left_join(epi_calendar) %>%
     dplyr::select(first_day,  panther_Ct, id) %>%
@@ -244,7 +249,7 @@ for(index in 1:27){
   # To do get true incidence rate
   leb_dat <- read_csv(paste0(HOME_WD,"/virosolver_paper/data/RHUH_cases_data.csv")) %>%
     mutate(roll_mean=rollmean(new_cases, 7,fill=NA,align="right")) %>%
-    filter(date > "2020-04-15" & date < end_date) ## After biased symptomatic sampling time
+    filter(date > start_date & date < end_date) ## After biased symptomatic sampling time
   trajs_quants$frame <- timepoint
   trajs_quants_all <- bind_rows(trajs_quants_all, trajs_quants)
   ## Incidence rate plot

@@ -18,25 +18,35 @@ library(fitdistrplus)
 library(deSolve)
 library(lazymcmc) ## devtools::install_github("jameshay218/lazymcmc")
 library(doParallel)
+library(zoo)
+
+# read command line arguments
+args = commandArgs(trailingOnly=TRUE)
+
+index           <- as.integer(args[1])
+iterations      <- as.integer(args[2])
+adaptive_period <- as.integer(args[3])
+par_name        <- args[4]
+par_value       <- as.double(args[5])
+sample_id       <- as.integer(args[6])
+
+runname <- paste0('gp_leb_',par_name,'_i_',index,'_s_',sample_id)
 
 #HOME_WD <- "~/"
 HOME_WD <- Sys.getenv("GITDIR")
 devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
 ## Arguments for this run
-index <- 1994
-set.seed(index)
-n_samp <- 1000
+# index <- 1994
+# set.seed(index)
+set.seed(sample_id)
+n_samp <- adaptive_period/50 # thinning rate
 cap_patients <- 1000
 p_patients <- 0.1
 run_version <- "gp" ##gp, seir or exp##
 rerun_mcmc <- TRUE
 use_pt <- FALSE
 
-# runname <- "rhuh_gp_cap.og"
-# end_date <- "2020-12-01"
-# end_plot <- "2020-12-15"
-runname <- "rhuh_gp_cap.unseen"
 start_date <- "2020-04-15"
 start_plot <- "2020-04-15"
 end_date <- "2021-04-01"
@@ -50,34 +60,9 @@ chainwd <- paste0(HOME_WD,"/virosolver_paper/mcmc_chains/5.real_leb_ct/",runname
 results_wd <- paste0(HOME_WD,"/virosolver_paper/results/",runname)
 setwd(main_wd)
 
-## use parallel tempering
-if (use_pt){
-  devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
-  
-  ## MCMC parameters for Ct model fits if using parallel tempering branch
-  n_temperatures <- 10
-  # mcmcPars_ct <- list("iterations"=200000,"popt"=0.44,"opt_freq"=1000,
-  #                     "thin"=100,"adaptive_period"=100000,"save_block"=100,
-  #                     "temperature" = seq(1,101,length.out=n_temperatures),
-  #                     "parallel_tempering_iter" = 5,"max_adaptive_period" = 100000, 
-  #                     "adaptiveLeeway" = 0.2, "max_total_iterations" = 200000)
-  # 
-  mcmcPars_ct <- list("iterations"=50000,"popt"=0.44,"opt_freq"=1000,
-                      "thin"=5,"adaptive_period"=50000,"save_block"=100,
-                      "temperature" = seq(1,101,length.out=n_temperatures),
-                      "parallel_tempering_iter" = 5,"max_adaptive_period" = 50000, 
-                      "adaptiveLeeway" = 0.2, "max_total_iterations" = 50000)
-} else {
-  ## MCMC parameters for Ct model fits
-  mcmcPars_ct <- c("iterations"=500000,"popt"=0.44,"opt_freq"=2000,
-                   "thin"=50,"adaptive_period"=200000,"save_block"=100)
-}
-
-## Manage MCMC runs and parallel runs
-nchains <- 4
-n_clusters <- 4
-cl <- parallel::makeCluster(n_clusters, setup_strategy = "sequential")
-registerDoParallel(cl)
+## MCMC parameters for Ct model fits
+mcmcPars_ct <- c("iterations"=iterations,"popt"=0.44,"opt_freq"=1000,
+                  "thin"=50,"adaptive_period"=adaptive_period,"save_block"=100)
 
 ## Code for plotting
 source("code/plot_funcs.R")
@@ -94,7 +79,10 @@ inc_func_use <- gaussian_process_model
 prior_func_use <- prior_func_hinge_gp
 
 ## GP model parameters for fitting
-parTab <- read.csv(paste0(main_wd,"/pars/lebanon/partab_gp_model.csv"))
+parTab <- read.csv(paste0(main_wd,"/pars/lebanon/partab_gp_model_OPT.csv"))
+# set the gp parameter to be optimized
+parTab[parTab$names == par_name, c("values","fixed")] <- c(par_value,1)
+# write the configuration to csv
 write.csv(parTab,paste0(results_wd,"/partab_gp.csv")) # record parameters for this run
 
 pars <- parTab$values
@@ -190,72 +178,39 @@ f <- create_posterior_func(parTab, obs_dat1, prior_func_use,
                            t_dist=t_dist)
 f(parTab$values)
 
-## Run for each chain
-chains <- NULL
+j <- 1
+########################################
+## 5. Run MCMC
+########################################
+## Get random starting values
 if(rerun_mcmc){
-  res <- foreach(j=1:nchains,.packages = c("lazymcmc","extraDistr","tidyverse","patchwork")) %dopar% {
-    devtools::load_all(paste0(HOME_WD,"/virosolver"))
-    if (use_pt){
-      devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
-      
-      ## Get random starting values
-      startTab <- rep(list(parTab),n_temperatures)
-      for(k in 1:length(startTab)){
-        startTab[[k]] <- generate_viable_start_pars(parTab=parTab,
-                                                    obs_dat=obs_dat1,
-                                                    CREATE_POSTERIOR_FUNC=create_posterior_func,
-                                                    INCIDENCE_FUNC=inc_func_use,
-                                                    PRIOR_FUNC=prior_func_use,
-                                                    use_pos=TRUE,
-                                                    t_dist=t_dist)
-      }
-      covMat <- diag(nrow(startTab[[1]]))
-      mvrPars <- list(covMat,2.38/sqrt(nrow(startTab[[1]][startTab[[1]]$fixed==0,])),w=0.8)
-      mvrPars <- rep(list(mvrPars), n_temperatures)
-    } else {
-      ## Get random starting values
-      startTab <- generate_viable_start_pars(parTab,obs_dat1,
-                                             create_posterior_func,
-                                             inc_func_use,
-                                             prior_func_use,
-                                             t_dist=t_dist,
-                                             use_pos=TRUE)
-      covMat <- diag(nrow(startTab))
-      mvrPars <- list(covMat,2.38/sqrt(nrow(startTab[startTab$fixed==0,])),w=0.8)
-    }
-    
-    output <- run_MCMC(parTab=startTab,
-                       data=obs_dat1,
-                       INCIDENCE_FUNC=inc_func_use,
-                       PRIOR_FUNC = prior_func_use,
-                       solve_likelihood=TRUE,
-                       mcmcPars=mcmcPars_ct,
-                       filename=paste0(chainwd,"/",runname,"_chainno_",j),
-                       CREATE_POSTERIOR_FUNC=create_posterior_func,
-                       mvrPars=NULL,
-                       OPT_TUNING=0.2,
-                       use_pos=TRUE,
-                       t_dist=t_dist)
-    
-    ## Read in chain and remove burn in period
-    chain <- read.csv(output$file)
-    chain <- chain[chain$sampno > mcmcPars_ct["adaptive_period"],]
-    chain$sampno <-chain$sampno + max(chain$sampno)*(j-1)
-    chains[[j]] <- chain
-    chain <- do.call("bind_rows",chains)
-  } 
+  startTab <- generate_viable_start_pars(parTab,obs_dat1,
+                                         create_posterior_func,
+                                         inc_func_use,
+                                         prior_func_use,
+                                         t_dist=t_dist,
+                                         use_pos=TRUE)
+  covMat <- diag(nrow(startTab))
+  mvrPars <- list(covMat,2.38/sqrt(nrow(startTab[startTab$fixed==0,])),w=0.8)
+  
+  output <- run_MCMC(parTab=startTab,
+                     data=obs_dat1,
+                     INCIDENCE_FUNC=inc_func_use,
+                     PRIOR_FUNC = prior_func_use,
+                     solve_likelihood=TRUE,
+                     mcmcPars=mcmcPars_ct,
+                     filename=paste0(chainwd,"/",runname,"_chainno_",j),
+                     CREATE_POSTERIOR_FUNC=create_posterior_func,
+                     mvrPars=NULL,
+                     OPT_TUNING=0.2,
+                     use_pos=TRUE,
+                     t_dist=t_dist)
 }
+########################################
+## 6. Check MCMC run
+########################################    
+## Read in chain and remove burn in period
 source("6.RHUH/6.add_prior.R")
-chains_diag <- lazymcmc::load_mcmc_chains(chainwd, parTab,TRUE,1,mcmcPars_ct["adaptive_period"],
-                                          multi=FALSE,chainNo=FALSE,PTchain = use_pt)
-
-pdf(paste0(results_wd,"/mcmc_trace.pdf"))
-plot(chains_diag$list)
-dev.off()
-
-if (!use_pt) {
-  gelman_diagnostics(chains_diag$list)
-}
 chains <- lazymcmc::load_mcmc_chains(chainwd, parTab,FALSE,1,mcmcPars_ct["adaptive_period"],
                                      multi=FALSE,chainNo=TRUE,PTchain = use_pt)
 chain <- as.data.frame(chains$chain)
@@ -264,7 +219,8 @@ chain_comb <- chain[chain$chain == 1,]
 chain_comb$sampno <- 1:nrow(chain_comb)
 
 model_func <- create_posterior_func(parTab,obs_dat1,NULL,inc_func_use,"model")
-p_dist_fits <- plot_distribution_fits_bwh(chain_comb, obs_dat1, model_func,100,TRUE,date_key)
+p_dist_fits <- plot_distribution_fits_bwh(chain_comb, obs_dat1, model_func,
+                                          nsamps = min(n_samp,100),TRUE,date_key)
 
 ## Get smoothed growth rates
 test_ages <- 0:50
