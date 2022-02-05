@@ -36,7 +36,7 @@ run_version <- "gp" ##gp, seir or exp##
 # runname <- "rhuh_gp_cap.og"
 # end_date <- "2020-12-01"
 # end_plot <- "2020-12-15"
-runname <- "rhuh_gp_cap.unseen.3"
+runname <- "rhuh_gp_cap.unseen"
 start_date <- "2020-04-15"
 start_plot <- "2020-04-15"
 end_date <- "2021-04-01"

@@ -9,6 +9,36 @@ from subprocess import PIPE,STDOUT
 from typing import Any, Dict, Union, List, Dict, Callable
 
 #=========================================================#
+#                 Create empty directory                  #
+#=========================================================#
+def check_folder(folder,clear=False):
+    """
+    check if folder exists, make if not present
+
+    Parameters
+    ----------
+    folder : str
+        name of directory to check
+    clear : bool, optional
+        whether to clear the directory
+
+    Raises
+    ------
+    Exception
+        if folder could not be created or found
+    """
+
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    elif not os.path.exists(folder) and not clear:
+        raise Exception('%s directory not found' %(folder))
+
+    for f in os.listdir(folder):
+        dirname = os.path.join(folder, f)
+        if not os.path.isdir(dirname) and clear:
+            os.remove(dirname)
+
+#=========================================================#
 #                  PARALLEL PROCESSING                    #
 #=========================================================#
 def starmap_with_kwargs(pool, fn, args_iter, kwargs_iter):
@@ -90,14 +120,20 @@ def run_mcmc(arguments,path,script,skip=False):
     """
     arguments_str = ' '.join(map(str,arguments)) # print variables as space delimited string
     script_file = os.path.join(path,script)
-    command = 'Rscript %s %s' %(script_file,arguments_str)
-    print(command)
+
+    results_folder = os.path.join(path,'..','mcmc_chains','5.real_leb_ct','sim_LEB_gp')
+    check_folder(results_folder)
+    out_log = os.path.join(results_folder,'a%i.Rout'%arguments[0])
+    err_log = os.path.join(results_folder,'a%i.Rerr'%arguments[0])
+
+    command = 'Rscript %s %s' %(script_file,arguments_str) + ' ' + '>' + out_log + ' ' + '2>' + err_log
+    
     if not skip:
         system_command(command)
 
 if __name__ == "__main__":
 
-    N_CHAINS = 30
+    N_CHAINS = 48
 
     vkwargs = []; i = 0
     for i in range(N_CHAINS):

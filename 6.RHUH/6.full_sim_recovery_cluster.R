@@ -27,13 +27,16 @@ HOME_WD <- Sys.getenv("GITDIR")
 devtools::load_all(paste0(HOME_WD,"/virosolver"))
 
 rerun_mcmc <- TRUE
-use_pt <- TRUE
+use_pt <- FALSE
 cap_patients <- 1000
 p_patients <- 0.1
+adaptive_period <- 100000
+thin <- 50
+
 start_date <- "2020-04-15"
 start_plot <- "2020-04-15"
-end_date <- "2020-12-01"
-end_plot <- "2020-12-15"
+end_date <- "2021-04-01"
+end_plot <- "2021-04-15"
 
 # start_date <- "2020-06-01"
 # start_plot <- "2020-04-15"
@@ -59,8 +62,8 @@ if (use_pt){
                       "adaptiveLeeway" = 0.2, "max_total_iterations" = 50000)
 } else {
   ## MCMC parameters for Ct model fits
-  mcmcPars_ct <- c("iterations"=200000,"popt"=0.44,"opt_freq"=2000,
-                   "thin"=350,"adaptive_period"=200000,"save_block"=100)
+  mcmcPars_ct <- c("iterations"=100000,"popt"=0.44,"opt_freq"=1000,
+                   "thin"=thin,"adaptive_period"=adaptive_period,"save_block"=100)
 }
 
 ## Arguments for this run, controlled by a csv file
@@ -116,7 +119,7 @@ parTab <- read.csv(control_table$parTab_file[simno], stringsAsFactors=FALSE)
 ## 3. Final admin
 ########################################
 ## Fixed control parameters
-n_samp <- 500
+n_samp <- adaptive_period/thin
 
 ## CHANGE TO MAIN WD and manage save locations
 chainwd <- paste0(top_chainwd,runname,"/",run_index,"/timepoint_",timepoint)

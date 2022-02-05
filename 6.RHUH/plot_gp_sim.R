@@ -33,7 +33,7 @@ source(paste0(HOME_WD,"/virosolver_paper/code/priors.R"))
 source(paste0(HOME_WD,"/virosolver_paper/code/plot_funcs.R"))
 
 ## MCMC parameters for Ct model fits
-mcmcPars_ct <- c("adaptive_period"=200000)
+mcmcPars_ct <- c("adaptive_period"=100000)
 
 use_pt <- TRUE
 
@@ -61,7 +61,7 @@ ps <- NULL
 trajs_quants_all <- NULL
 obs_dat_use_all <- NULL
 ## Get task ID, used to read options from control table
-for(index in 1:27){
+for(index in 1:51){
   simno <- index
   ## Set random seed
   set.seed(simno)
@@ -105,7 +105,7 @@ for(index in 1:27){
   ## 3. Final admin
   ########################################
   ## Fixed control parameters
-  n_samp <- 500
+  n_samp <- 100000/50
   
   ## CHANGE TO MAIN WD and manage save locations
   chainwd <- paste0(top_chainwd,runname,"/",run_index,"/timepoint_",timepoint)

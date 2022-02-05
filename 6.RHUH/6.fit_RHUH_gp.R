@@ -18,6 +18,7 @@ library(fitdistrplus)
 library(deSolve)
 library(lazymcmc) ## devtools::install_github("jameshay218/lazymcmc")
 library(doParallel)
+library(zoo)
 
 #HOME_WD <- "~/"
 HOME_WD <- Sys.getenv("GITDIR")

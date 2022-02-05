@@ -19,18 +19,50 @@ library(deSolve)
 library(lazymcmc) ## devtools::install_github("jameshay218/lazymcmc")
 library(doParallel)
 library(zoo)
+library(argparse)
 
-# read command line arguments
-args = commandArgs(trailingOnly=TRUE)
+parser <- ArgumentParser(description='pass in mcmc parameteres via command line')
 
-index           <- as.integer(args[1])
-iterations      <- as.integer(args[2])
-adaptive_period <- as.integer(args[3])
-par_name        <- args[4]
-par_value       <- as.double(args[5])
-sample_id       <- as.integer(args[6])
+# non-optional arguments
+parser$add_argument('--index', type="integer", nargs='?')
+parser$add_argument('--iterations', type="integer", nargs='?')
+parser$add_argument('--adaptive_period', type="integer", nargs='?')
+parser$add_argument('--thin', type="integer", nargs='?')
+parser$add_argument('--opt_freq', type="integer", nargs='?')
+parser$add_argument('--sample_id', type="integer", nargs='?')
+parser$add_argument('--key_file', type="character", default='', nargs='?')
+parser$add_argument("--use_pt", action='store_true',
+                    help="whether to use parallel tempering branch")
 
-runname <- paste0('gp_leb_',par_name,'_i_',index,'_s_',sample_id)
+# optional arguments
+parser$add_argument('--desired_mode', type="double", default=7.0, nargs='?')
+parser$add_argument('--viral_peak', type="double", default=19.73598747, nargs='?')
+parser$add_argument('--obs_sd', type="double", default=5.0, nargs='?')
+parser$add_argument('--sd_mod', type="double", default=0.2, nargs='?')
+parser$add_argument('--sd_mod_wane', type="double", default=14.0, nargs='?')
+parser$add_argument('--LOD', type="double", default=3.0, nargs='?')
+parser$add_argument('--incu', type="double", default=5.0, nargs='?')
+parser$add_argument('--t_switch', type="double", default=13.29211948, nargs='?')
+parser$add_argument('--level_switch', type="double", default=19.0, nargs='?')
+parser$add_argument('--wane_rate2', type="double", default=1000.0, nargs='?')
+parser$add_argument('--prob_detect', type="double", default=0.103299323, nargs='?')
+parser$add_argument('--nu', type="double", default=1.0, nargs='?')
+parser$add_argument('--rho', type="double", default=0.03, nargs='?')
+
+# get command line options, if help option encountered print help and exit,
+# otherwise if options not found on command line then set defaults, 
+args <- parser$parse_args()
+print(args)
+index           <- args$index
+iterations      <- args$iterations
+adaptive_period <- args$adaptive_period
+thin            <- args$thin
+opt_freq        <- args$opt_freq
+sample_id       <- args$sample_id
+key_file        <- args$key_file
+use_pt          <- args$use_pt
+
+runname <- paste0('gp_leb_',key_file,'_i_',index,'_s_',sample_id)
 
 #HOME_WD <- "~/"
 HOME_WD <- Sys.getenv("GITDIR")
@@ -40,12 +72,11 @@ devtools::load_all(paste0(HOME_WD,"/virosolver"))
 # index <- 1994
 # set.seed(index)
 set.seed(sample_id)
-n_samp <- adaptive_period/50 # thinning rate
+n_samp <- adaptive_period/thin # thinning rate
 cap_patients <- 1000
 p_patients <- 0.1
 run_version <- "gp" ##gp, seir or exp##
 rerun_mcmc <- TRUE
-use_pt <- FALSE
 
 start_date <- "2020-04-15"
 start_plot <- "2020-04-15"
@@ -61,8 +92,21 @@ results_wd <- paste0(HOME_WD,"/virosolver_paper/results/",runname)
 setwd(main_wd)
 
 ## MCMC parameters for Ct model fits
-mcmcPars_ct <- c("iterations"=iterations,"popt"=0.44,"opt_freq"=1000,
-                  "thin"=50,"adaptive_period"=adaptive_period,"save_block"=100)
+## use parallel tempering
+if (use_pt){
+  devtools::load_all(paste0(HOME_WD,"/lazymcmc")) # parallel tempering branch
+  ## MCMC parameters for Ct model fits if using parallel tempering branch
+  n_temperatures <- 10
+  mcmcPars_ct <- list("iterations"=iterations,"popt"=0.44,"opt_freq"=opt_freq,
+                      "thin"=thin,"adaptive_period"=adaptive_period,"save_block"=100,
+                      "temperature" = seq(1,101,length.out=n_temperatures),
+                      "parallel_tempering_iter" = 5,"max_adaptive_period" = adaptive_period, 
+                      "adaptiveLeeway" = 0.2, "max_total_iterations" = iterations)
+} else {
+  ## MCMC parameters for Ct model fits
+  mcmcPars_ct <- c("iterations"=iterations,"popt"=0.44,"opt_freq"=opt_freq,
+                   "thin"=thin,"adaptive_period"=adaptive_period,"save_block"=100)
+}
 
 ## Code for plotting
 source("code/plot_funcs.R")
@@ -81,7 +125,16 @@ prior_func_use <- prior_func_hinge_gp
 ## GP model parameters for fitting
 parTab <- read.csv(paste0(main_wd,"/pars/lebanon/partab_gp_model_OPT.csv"))
 # set the gp parameter to be optimized
-parTab[parTab$names == par_name, c("values","fixed")] <- c(par_value,1)
+
+# Set gp parameters
+for (par_name in c("desired_mode","viral_peak","obs_sd","sd_mod","sd_mod_wane","LOD",
+                   "incu","t_switch","level_switch","wane_rate2","prob_detect","nu","rho")) {
+  par_value = args[names(args) == par_name]
+  print(par_name)
+  print(par_value)
+  parTab[parTab$names == par_name, "values"] <- par_value
+}
+
 # write the configuration to csv
 write.csv(parTab,paste0(results_wd,"/partab_gp.csv")) # record parameters for this run
 
@@ -184,14 +237,34 @@ j <- 1
 ########################################
 ## Get random starting values
 if(rerun_mcmc){
-  startTab <- generate_viable_start_pars(parTab,obs_dat1,
-                                         create_posterior_func,
-                                         inc_func_use,
-                                         prior_func_use,
-                                         t_dist=t_dist,
-                                         use_pos=TRUE)
-  covMat <- diag(nrow(startTab))
-  mvrPars <- list(covMat,2.38/sqrt(nrow(startTab[startTab$fixed==0,])),w=0.8)
+  
+  if (use_pt){
+    ## Get random starting values
+    startTab <- rep(list(parTab),n_temperatures)
+    for(k in 1:length(startTab)){
+      startTab[[k]] <- generate_viable_start_pars(parTab=parTab,
+                                                  obs_dat=obs_dat1,
+                                                  CREATE_POSTERIOR_FUNC=create_posterior_func,
+                                                  INCIDENCE_FUNC=inc_func_use,
+                                                  PRIOR_FUNC=prior_func_use,
+                                                  use_pos=TRUE,
+                                                  t_dist=t_dist)
+    }
+    covMat <- diag(nrow(startTab[[1]]))
+    mvrPars <- list(covMat,2.38/sqrt(nrow(startTab[[1]][startTab[[1]]$fixed==0,])),w=0.8)
+    mvrPars <- rep(list(mvrPars), n_temperatures)
+  } else {
+    ## Get random starting values
+    startTab <- generate_viable_start_pars(parTab,obs_dat1,
+                                           create_posterior_func,
+                                           inc_func_use,
+                                           prior_func_use,
+                                           t_dist=t_dist,
+                                           use_pos=TRUE)
+    covMat <- diag(nrow(startTab))
+    mvrPars <- list(covMat,2.38/sqrt(nrow(startTab[startTab$fixed==0,])),w=0.8)
+    
+  }
   
   output <- run_MCMC(parTab=startTab,
                      data=obs_dat1,
@@ -424,10 +497,12 @@ ground_truth <- leb_dat %>%
   complete(date = seq.Date(min(date), max(date), by="day")) %>%
   fill('new_cases') %>%
   mutate(prob = new_cases/sum(new_cases)) %>%
-  mutate(roll_mean=rollmean(prob, 7,fill=NA,align="left"))
+  mutate(roll_mean=rollmean(prob, 7,fill=NA,align="left")) %>%
+  filter(date >= "2020-07-01")
 
 prediction <- trajs_quants %>%
-  filter(date <= last(ground_truth$date))
+  filter(date <= last(ground_truth$date)) %>%
+  filter(date >= "2020-07-01")
 
 comp <- data.frame(pred = prediction$median, 
                    lower = prediction$lower, 
@@ -460,8 +535,15 @@ if(TRUE){
   ggsave(filename=paste0(results_wd,"/error_plot.png"),plot=p_error,height=6,width=6,units="in",dpi=300)
 }
 
+comp <- data.frame(pred = c(0,1,2), 
+                   actual = c(2,3,1))
+
 # Write MSE error to file
 write.csv(error,paste0(results_wd,"/error.csv"))
+# Write for MATLAB
+fileConn<-file(paste0(results_wd,"/error.txt"))
+writeLines(toString(error), fileConn)
+close(fileConn)
 
 pdf(paste0(results_wd,"/final_plot.pdf"),height=7,width=8)
 p_leb/p_dat/p_inc 
